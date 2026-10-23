@@ -1,0 +1,50 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+default-members = ["crates/shot", "crates/shot-core", "crates/shot-platform"]
+
+[workspace.package]
+version = "1.0.0"
+edition = "2024"
+license = "MIT"
+publish = false
+
+[workspace.dependencies]
+shot-core = { path = "crates/shot-core" }
+shot-platform = { path = "crates/shot-platform" }
+ab_glyph = { version = "0.2", default-features = false, features = ["std"] }
+block2 = "0.6"
+libc = "0.2"
+objc2 = "0.6"
+objc2-app-kit = "0.3"
+objc2-core-foundation = "0.3"
+objc2-core-graphics = "0.3"
+objc2-core-media = "0.3"
+objc2-core-video = "0.3"
+objc2-foundation = "0.3"
+objc2-io-surface = "0.3"
+objc2-quartz-core = "0.3"
+objc2-screen-capture-kit = "0.3"
+objc2-service-management = "0.3"
+png = "0.18"
+tiny-skia = { version = "0.12", default-features = false, features = ["std", "simd"] }
+toml = "1.1"
+windows = "0.62"
+
+[workspace.lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+
+[workspace.lints.clippy]
+dbg_macro = "warn"
+
+# Speed over size: the binary is small anyway, latency budgets are not (SPEC §2).
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = "symbols"
+
+# Pixel work (capture, tiny-skia, PNG) is unusably slow unoptimized; keep our own code debuggable.
+[profile.dev.package."*"]
+opt-level = 2

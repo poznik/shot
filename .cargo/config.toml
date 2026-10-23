@@ -1,0 +1,7 @@
+# Link the C runtime statically on Windows: shot.exe runs without the VC++ redistributable.
+# Note: a RUSTFLAGS environment variable replaces these flags entirely — do not set it in CI.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]
+
+[target.aarch64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]

@@ -1,0 +1,18 @@
+[package]
+name = "shot"
+description = "Shot: fast, lightweight screenshot tool for Windows and macOS"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+shot-core.workspace = true
+shot-platform.workspace = true
+
+[target.'cfg(windows)'.dependencies.windows]
+workspace = true
+features = ["Win32_System_SystemInformation", "Win32_UI_WindowsAndMessaging"]
+
+[lints]
+workspace = true
