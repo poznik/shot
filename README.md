@@ -1,185 +1,193 @@
-# Shot
+<p align="center"><img src="media/banner.png" alt="Shot — быстрый инструмент для скриншотов на Windows и macOS"></p>
 
-A fast, frugal screenshot tool for Windows and macOS, with the same look and the same keys on
-both. Press the hotkey and the screen freezes in 35 ms; pick a window or drag an area, and the
-shot is in the clipboard 12 ms after you let go of the mouse. At rest Shot takes 2 MB of memory
-and sleeps until the next hotkey.
+<p align="center"><b>Русский</b> · <a href="README.en.md">English</a></p>
 
-![Shot: drag an area, then mark it up in the editor](media/demo.gif)
+Быстрый и экономный инструмент для скриншотов на Windows и macOS: на обеих системах он выглядит
+одинаково и слушается одних и тех же клавиш. Нажмите горячую клавишу — экран замрёт за 35 мс;
+выберите окно или протяните область, и через 12 мс после того, как вы отпустите мышь, снимок уже
+в буфере обмена. В покое Shot занимает 2 МБ памяти и спит до следующего нажатия.
 
-| 35 ms | 2 MB | < 2 MB | 0 |
+https://github.com/user-attachments/assets/39601a47-2756-40da-a265-687b62e4b51f
+
+<p align="center"><sub>Ролик о Shot на 23 секунды, подписи на английском. Включите звук.</sub></p>
+
+| 35 мс | 2 МБ | < 2 МБ | 0 |
 |:---:|:---:|:---:|:---:|
-| hotkey to frozen screen | of memory at rest | the whole program on Windows | network requests; no timers or polling at rest |
+| от горячей клавиши до замершего экрана | памяти в покое | вся программа на Windows | сетевых запросов; в покое ни таймеров, ни опроса |
 
-- **Frozen screen.** Shot captures every monitor the moment you press the hotkey, so open menus
-  and tooltips stay put while you choose what to keep.
-- **Window, area or whole screen**, at full resolution on high-DPI and Retina displays, with
-  monitors at different scales side by side.
-- **Preview in the corner** that never takes the focus from the window you work in.
-- **An editor for quick marks**: arrows, lines, rectangles, ellipses and numbered steps. Every
-  mark stays an object you can move, resize, recolor or delete. Drag the result straight into a
-  chat or a folder.
-- **Private.** No network access, no telemetry, no account.
+- **Замерший экран.** Shot снимает все мониторы в момент нажатия, поэтому открытые меню и
+  подсказки остаются на месте, пока вы выбираете, что сохранить.
+- **Окно, область или весь экран** в полном разрешении на экранах высокой чёткости и Retina,
+  в том числе когда рядом стоят мониторы с разным масштабом.
+- **Превью в углу**, которое никогда не забирает фокус у окна, в котором вы работаете.
+- **Редактор для быстрых пометок**: стрелки, линии, прямоугольники, эллипсы и нумерованные шаги.
+  Каждая пометка остаётся объектом: её можно сдвинуть, изменить размер, перекрасить или удалить.
+  Результат можно перетащить прямо в чат или в папку.
+- **Приватность.** Ни доступа к сети, ни телеметрии, ни учётной записи.
 
-The interface is in Russian for now.
+Интерфейс пока только на русском.
 
-## Speed and memory
+## Скорость и память
 
-Every step of a capture has a time and memory budget, and a change that breaks one is a bug.
-Measured on release builds on a Ryzen 7 7800X3D with Windows 11 and two monitors, 2560×1440 at
-100% and a portrait 1440×2560 at 125%; medians, or the range over runs:
+У каждого шага съёмки есть бюджет по времени и памяти, и изменение, которое его нарушает, — баг.
+Замеры на релизных сборках: Ryzen 7 7800X3D, Windows 11 и два монитора, 2560×1440 при 100 % и
+вертикальный 1440×2560 при 125 %; медианы или разброс по запускам:
 
-| Step | Shot | Budget |
+| Шаг | Shot | Бюджет |
 |---|---:|---:|
-| Launch → hotkey works | 42–49 ms | 100 ms |
-| Hotkey → frozen screen on the monitor under the pointer | 35 ms | 50 ms |
-| Mouse released → shot in the clipboard | 12–13 ms | 30 ms |
-| Mouse released → preview on screen | 15–19 ms | 50 ms |
-| Click on the preview → editor on screen | 23–43 ms | 100 ms |
-| One frame while dragging an area on a 4K monitor | 0.1–0.2 ms | 8 ms |
-| One frame while drawing in the editor, 4K | 0.3–1 ms | 8 ms |
-| Memory at rest (Task Manager's *Memory* column) | 2 MB | 10 MB |
-| Memory 5 s after the editor closes | +0.4 MB | +5 MB |
-| Program size | under 2 MB | 5 MB |
+| Запуск → горячая клавиша работает | 42–49 мс | 100 мс |
+| Горячая клавиша → замерший экран на мониторе под курсором | 35 мс | 50 мс |
+| Мышь отпущена → снимок в буфере обмена | 12–13 мс | 30 мс |
+| Мышь отпущена → превью на экране | 15–19 мс | 50 мс |
+| Клик по превью → редактор на экране | 23–43 мс | 100 мс |
+| Один кадр, пока тянете область на 4K-мониторе | 0,1–0,2 мс | 8 мс |
+| Один кадр, пока рисуете в редакторе, 4K | 0,3–1 мс | 8 мс |
+| Память в покое (столбец *Память* в Диспетчере задач) | 2 МБ | 10 МБ |
+| Память через 5 с после закрытия редактора | +0,4 МБ | +5 МБ |
+| Размер программы | меньше 2 МБ | 5 МБ |
 
-On a MacBook Air M3 Shot is ready 70 ms after launch, takes 9 MB at rest (Activity Monitor's
-*Memory*), puts a whole Retina screen in the clipboard in 15–19 ms and opens the editor in
-40–60 ms. The first launch after an install is slower, once, while macOS checks the app.
+На MacBook Air M3 Shot готов через 70 мс после запуска, занимает 9 МБ в покое (*Память* в
+Мониторинге системы), кладёт весь экран Retina в буфер обмена за 15–19 мс и открывает редактор
+за 40–60 мс. Первый запуск после установки один раз дольше: macOS проверяет приложение.
 
-While the overlay is open, Shot holds a frozen frame and a canvas for each monitor: about 60 MB
-for the two monitors above. It gives them back to the system as the overlay closes.
+Пока открыт оверлей, Shot держит замороженный кадр и холст для каждого монитора: около 60 МБ для
+двух мониторов выше. Он отдаёт их системе, как только оверлей закрывается.
 
-### Where the speed comes from
+### Откуда скорость
 
-- **The capture comes before the interface.** The hotkey grabs the monitor under the pointer
-  first and shows its overlay at once; the other monitors follow.
-- **Everything is ready before the hotkey.** The overlay and preview windows are made at start
-  and kept hidden. The hotkey only shows them.
-- **Only what changes is redrawn.** Dragging an area on a 4K monitor redraws the strips around
-  the frame, 0.07 of 8.3 megapixels a step. The screen is dimmed on the fly with SIMD as it is
-  copied, so there is no third screen-sized buffer.
-- **The clipboard first, the disk in the background.** The PNG is written on another thread
-  after the shot is already in the clipboard.
-- **Memory goes back.** Screen-sized buffers are freed as soon as the overlay or the editor
-  closes. On Windows Shot does not keep its own copy of the clipboard image (14 MB at 1440p,
-  33 MB at 4K), and the folder picker runs in a separate short-lived process, because the system
-  dialog leaves about 5 MB of shell libraries behind in any process that shows it.
-- **Asleep at rest.** No timers and no polling: one thread waits on a single system call for the
-  hotkey, a click on the tray icon or a change to the settings file.
-- **A small stack.** Rust, Win32 and AppKit called directly, and
-  [tiny-skia](https://github.com/linebender/tiny-skia) for every pixel Shot draws. No web view,
-  no GPU context, no runtime, no network code.
+- **Сначала снимок, потом интерфейс.** По горячей клавише Shot сначала снимает монитор под
+  курсором и сразу показывает его оверлей; остальные мониторы — следом.
+- **Всё готово до нажатия.** Окна оверлея и превью создаются при запуске и ждут скрытыми.
+  Горячая клавиша их только показывает.
+- **Перерисовывается только то, что изменилось.** Когда вы тянете область на 4K-мониторе,
+  перерисовываются полосы вокруг рамки: 0,07 из 8,3 мегапикселя за шаг. Экран затемняется на лету
+  SIMD-инструкциями, пока копируется, поэтому третьего буфера размером с экран нет.
+- **Сначала буфер обмена, диск — в фоне.** PNG пишется в другом потоке, когда снимок уже в
+  буфере обмена.
+- **Память возвращается.** Буферы размером с экран освобождаются, как только закрывается оверлей
+  или редактор. На Windows Shot не держит свою копию картинки из буфера обмена (14 МБ при 1440p,
+  33 МБ при 4K), а выбор папки работает в отдельном короткоживущем процессе: системный диалог
+  оставляет около 5 МБ библиотек оболочки в любом процессе, который его показал.
+- **В покое спит.** Ни таймеров, ни опроса: один поток ждёт в одном системном вызове горячую
+  клавишу, клик по значку в трее или изменение файла настроек.
+- **Небольшой стек.** Rust, прямые вызовы Win32 и AppKit и
+  [tiny-skia](https://github.com/linebender/tiny-skia) для каждого пикселя, который рисует Shot.
+  Ни веб-вью, ни GPU-контекста, ни рантайма, ни сетевого кода.
 
-## Install
+## Установка
 
-Download the latest build from [Releases](https://github.com/poznik/shot/releases). The builds
-are not signed by Microsoft or Apple, so each system warns you once before the first start.
+Скачайте последнюю сборку со страницы [Releases](https://github.com/poznik/shot/releases).
+Сборки не подписаны Microsoft и Apple, поэтому каждая система один раз предупредит перед первым
+запуском.
 
-### Windows 10 22H2 or 11
+### Windows 10 22H2 или 11
 
-1. Download `Shot-<version>-windows-x64-setup.exe` and run it. It needs no administrator rights:
-   Shot goes to `%LOCALAPPDATA%\Programs\Shot`, with a Start menu shortcut and an entry in
-   **Settings → Apps**.
-2. If SmartScreen says "Windows protected your PC", click **More info**, then **Run anyway**.
-3. At the end the installer offers to start Shot. It lives in the notification area; the first
-   start offers to start Shot at login.
+1. Скачайте `Shot-<version>-windows-x64-setup.exe` и запустите. Права администратора не нужны:
+   Shot ставится в `%LOCALAPPDATA%\Programs\Shot`, с ярлыком в меню «Пуск» и записью в
+   **Параметры → Приложения**.
+2. Если SmartScreen пишет «Система Windows защитила ваш компьютер», нажмите **Подробнее**, затем
+   **Выполнить в любом случае**.
+3. В конце установщик предложит запустить Shot. Он живёт в области уведомлений; при первом
+   запуске Shot предложит запускаться при входе в систему.
 
-To update, run the installer of a newer version: it closes Shot and keeps your settings and
-start at login, also over the single-file Shot 1.0 in that folder.
+Чтобы обновиться, запустите установщик новой версии: он закроет Shot и сохранит настройки и
+автозапуск, в том числе поверх однофайлового Shot 1.0 в этой папке.
 
-### macOS 14 or later
+### macOS 14 или новее
 
-1. Download `Shot-<version>-macos.dmg`, open it and drag **Shot** onto **Applications**.
-2. Open Shot. macOS says it cannot verify the app: click **Done**, open **System Settings →
-   Privacy & Security**, scroll down and click **Open Anyway** next to Shot.
-3. Shot needs the **Screen Recording** permission: its window has a button that opens the right
-   page of System Settings. Turn Shot on there.
-4. Shot lives in the menu bar and has no Dock icon.
+1. Скачайте `Shot-<version>-macos.dmg`, откройте его и перетащите **Shot** в **Программы**.
+2. Откройте Shot. macOS скажет, что не может проверить приложение: нажмите **Готово**, откройте
+   **Системные настройки → Конфиденциальность и безопасность**, прокрутите вниз и нажмите
+   **Всё равно открыть** рядом с Shot.
+3. Shot нужно разрешение **Запись экрана**: в его окне есть кнопка, которая открывает нужную
+   страницу Системных настроек. Включите там Shot.
+4. Shot живёт в строке меню, значка в Dock у него нет.
 
-## Use
+## Как пользоваться
 
-Press **Ctrl+Shift+2** on Windows or **⇧⌘2** on macOS. The screen freezes and dims; the window
-under the pointer lights up, and the size of the area follows the pointer.
+![Shot: протяните область, затем разметьте её в редакторе](media/demo.gif)
 
-![The overlay: an area dragged over a frozen desktop, its size next to the pointer](media/overlay.png)
+Нажмите **Ctrl+Shift+2** на Windows или **⇧⌘2** на macOS. Экран замирает и темнеет; окно под
+курсором подсвечивается, а размер области показан рядом с курсором.
 
-| Do | To |
+![Оверлей: область, протянутая над замершим рабочим столом, и её размер рядом с курсором](media/overlay.png)
+
+| Действие | Что получится |
 |---|---|
-| Click a highlighted window | Capture the window |
-| Drag | Capture an area |
-| `Space` | Capture each monitor to its own file; the clipboard gets the one under the cursor |
-| `Esc` or right click | Cancel |
+| Клик по подсвеченному окну | Снимок окна |
+| Протянуть | Снимок области |
+| `Space` | Каждый монитор в свой файл; в буфер обмена — тот, что под курсором |
+| `Esc` или правый клик | Отмена |
 
-The shot goes to the clipboard and to `Pictures/Shot` as `Shot 2026-10-22 17-03-15.png`, and a
-preview shows in a bottom corner for a few seconds. Pointing at it keeps it on screen; a click
-opens the editor.
+Снимок попадает в буфер обмена и в `Pictures/Shot` как `Shot 2026-10-22 17-03-15.png`, а в
+нижнем углу на несколько секунд появляется превью. Пока курсор на нём, оно не исчезает; клик
+открывает редактор.
 
-![The preview card in the corner of the screen](media/preview.png)
+![Карточка превью в углу экрана](media/preview.png)
 
-### Editor
+### Редактор
 
-![The editor with an arrow, a rectangle and two numbered steps on a capture](media/editor.png)
+![Редактор: стрелка, прямоугольник и два нумерованных шага на снимке](media/editor.png)
 
-`Ctrl` is `Cmd` on macOS.
+На macOS вместо `Ctrl` — `Cmd`.
 
-| Key | Action |
+| Клавиша | Действие |
 |---|---|
-| `A` `L` `R` `O` `N` | Arrow, line, rectangle, ellipse, counter; `N` again switches 1, 2, 3 and A, B, C |
-| `V` | Select: move, resize with the handles, `Del` to delete |
-| `Ctrl+Z`, `Ctrl+Shift+Z` | Undo, redo (also `Ctrl+Y` on Windows) |
-| `Ctrl+C` | Copy the result |
-| `Ctrl+S` | Save over the same file and copy |
-| `Enter` | Save and close |
-| `Esc` | Close; with unsaved edits, Shot asks first |
-| `Ctrl` + wheel, `Ctrl+0`, `Ctrl+1` | Zoom, fit, 100% |
+| `A` `L` `R` `O` `N` | Стрелка, линия, прямоугольник, эллипс, счётчик; `N` ещё раз переключает 1, 2, 3 и A, B, C |
+| `V` | Выделение: двигать, менять размер за маркеры, `Del` — удалить |
+| `Ctrl+Z`, `Ctrl+Shift+Z` | Отменить, повторить (на Windows ещё `Ctrl+Y`) |
+| `Ctrl+C` | Скопировать результат |
+| `Ctrl+S` | Сохранить в тот же файл и скопировать |
+| `Enter` | Сохранить и закрыть |
+| `Esc` | Закрыть; если есть несохранённые правки, Shot сначала спросит |
+| `Ctrl` + колесо, `Ctrl+0`, `Ctrl+1` | Масштаб, вписать в окно, 100 % |
 
-Drag the **Перетащить** (Drag) button in the bottom left corner like a file: drop it on a folder
-to get a copy of the shot, or in a chat to send it. Dragging saves nothing.
+Кнопку **Перетащить** в левом нижнем углу можно тащить, как файл: бросьте её на папку, чтобы
+получить копию снимка, или в чат, чтобы его отправить. Перетаскивание ничего не сохраняет.
 
-### Settings
+### Настройки
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="media/settings-dark.png">
-  <img src="media/settings-light.png" width="560" alt="The settings window">
+  <img src="media/settings-light.png" width="560" alt="Окно настроек">
 </picture>
 
-Open **Настройки…** (Settings) from the tray or menu bar icon to change the hotkey, where shots go
-(clipboard, file or both), the folder, the preview and its corner (bottom left or bottom right),
-start at login and the theme. Starting Shot again while it runs opens the same window. The
-settings are a plain file: `%APPDATA%\Shot\settings.toml` on Windows,
-`~/Library/Application Support/Shot/settings.toml` on macOS.
+Откройте **Настройки…** из значка в трее или в строке меню, чтобы поменять горячую клавишу, куда
+идут снимки (буфер обмена, файл или оба), папку, превью и его угол (левый или правый нижний),
+автозапуск и тему. Если запустить Shot ещё раз, пока он работает, откроется это же окно.
+Настройки — обычный файл: `%APPDATA%\Shot\settings.toml` на Windows,
+`~/Library/Application Support/Shot/settings.toml` на macOS.
 
-## Uninstall
+## Удаление
 
-- **Windows:** **Settings → Apps → Shot → Uninstall**. It quits Shot and removes start at login;
-  your settings in `%APPDATA%\Shot` and shots in `Pictures\Shot` stay.
-- **Windows, the single file of 1.0:** turn off **Автозапуск** (start at login) in the tray menu,
-  quit Shot and delete the file. Its settings are in `%APPDATA%\Shot`.
-- **macOS:** turn off **Автозапуск** in the menu bar menu, quit Shot and move it to the Trash. Its
-  settings are in `~/Library/Application Support/Shot`.
+- **Windows:** **Параметры → Приложения → Shot → Удалить**. Это закроет Shot и уберёт
+  автозапуск; настройки в `%APPDATA%\Shot` и снимки в `Pictures\Shot` останутся.
+- **Windows, однофайловый Shot 1.0:** выключите **Автозапуск** в меню значка в трее, закройте
+  Shot и удалите файл. Его настройки лежат в `%APPDATA%\Shot`.
+- **macOS:** выключите **Автозапуск** в меню значка в строке меню, закройте Shot и перенесите его
+  в Корзину. Его настройки лежат в `~/Library/Application Support/Shot`.
 
-## Build from source
+## Сборка из исходников
 
-Shot is written in Rust (stable, edition 2024) and draws its own interface with
-[tiny-skia](https://github.com/linebender/tiny-skia); it uses no web view and no GPU context.
+Shot написан на Rust (stable, edition 2024) и сам рисует свой интерфейс с помощью
+[tiny-skia](https://github.com/linebender/tiny-skia); веб-вью и GPU-контекст он не использует.
 
 ```sh
 cargo build --release
 ```
 
-That gives `target/release/shot.exe` on Windows and `target/release/shot` on macOS. The Windows
-installer comes from `python tools/installer-win.py`, which needs
-[Inno Setup 6](https://jrsoftware.org/isinfo.php). To make `Shot.app` and its disk image on a
-Mac, run `tools/bundle-mac.sh`; add `--universal` for Apple silicon and Intel in one app (needs
-both Rust targets). macOS ties the Screen Recording permission to the app's
-signature: sign your builds with one certificate from `tools/mac-sign-cert.sh` to keep the
-permission across rebuilds.
+Получится `target/release/shot.exe` на Windows и `target/release/shot` на macOS. Установщик для
+Windows собирает `python tools/installer-win.py`, ему нужен
+[Inno Setup 6](https://jrsoftware.org/isinfo.php). Чтобы собрать `Shot.app` и образ диска на
+Mac, запустите `tools/bundle-mac.sh`; с `--universal` получится одно приложение для Apple silicon
+и Intel (нужны обе цели Rust). macOS привязывает разрешение «Запись экрана» к подписи
+приложения: подписывайте свои сборки одним сертификатом из `tools/mac-sign-cert.sh`, чтобы
+разрешение сохранялось между пересборками.
 
-The pictures in this README are drawn by Shot's own code on a made-up desktop:
-`cargo run -p shot-core --release --example demo` writes them to `target/demo`. The forms and
-behavior of every window, and the design tokens the code draws with, are in
-[docs/design](docs/design).
+Картинки в этом README нарисованы собственным кодом Shot на выдуманном рабочем столе:
+`cargo run -p shot-core --release --example demo` пишет их в `target/demo`. Формы и поведение
+каждого окна и токены дизайна, которыми рисует код, описаны в [docs/design](docs/design).
 
-## License
+## Лицензия
 
 [MIT](LICENSE)
