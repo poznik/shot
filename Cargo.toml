@@ -4,7 +4,7 @@ members = ["crates/*"]
 default-members = ["crates/shot", "crates/shot-core", "crates/shot-platform"]
 
 [workspace.package]
-version = "2.1.0"
+version = "2.1.1"
 edition = "2024"
 license = "MIT"
 publish = false

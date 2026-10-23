@@ -417,7 +417,13 @@ impl Session {
                     let from = (y + EDGE as usize) * row + EDGE as usize * 4;
                     let to = (r.y as usize + y) * back.stride + r.x as usize * 4;
                     let len = r.width as usize * 4;
-                    back.data[to..to + len].copy_from_slice(&src[from..from + len]);
+                    // The editor leaves the X byte as it comes, mostly 0. macOS shows the
+                    // buffer as BGRA, where that is alpha: everything but the image would be
+                    // see-through. Windows ignores the byte.
+                    let dst = back.data[to..to + len].as_chunks_mut::<4>().0;
+                    for (d, s) in dst.iter_mut().zip(src[from..from + len].as_chunks::<4>().0) {
+                        *d = [s[0], s[1], s[2], 255];
+                    }
                 }
             }
             self.scratch = canvas.take();

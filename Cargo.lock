@@ -506,7 +506,7 @@ dependencies = [
 
 [[package]]
 name = "shot"
-version = "2.1.0"
+version = "2.1.1"
 dependencies = [
  "shot-core",
  "shot-platform",
@@ -515,7 +515,7 @@ dependencies = [
 
 [[package]]
 name = "shot-core"
-version = "2.1.0"
+version = "2.1.1"
 dependencies = [
  "ab_glyph",
  "png",
@@ -525,7 +525,7 @@ dependencies = [
 
 [[package]]
 name = "shot-platform"
-version = "2.1.0"
+version = "2.1.1"
 dependencies = [
  "block2",
  "libc",

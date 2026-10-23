@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.1.1
+
+- macOS: the editor window shows its toolbar, the Drag button and the zoom; in 2.1.0 it showed
+  only the shot.
+
 ## 2.1.0
 
 - Windows installer: `Shot-2.1.0-windows-x64-setup.exe` installs Shot for the current user with
