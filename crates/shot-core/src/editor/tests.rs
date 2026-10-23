@@ -209,12 +209,12 @@ fn select_move_resize_nudge_and_delete() {
     char(&mut e, 'v');
     assert_eq!(e.tool(), Tool::Select);
 
-    // Inside the rect is not the rect: a click there lets the selection go.
-    click(&mut e, at(150.0, 130.0));
+    // Off the rect, a click lets the selection go.
+    click(&mut e, at(300.0, 250.0));
     assert_eq!(e.selected(), None);
     assert_eq!(e.cursor(), Cursor::Arrow);
 
-    // Its outline is: a drag there moves it.
+    // Its outline takes it: a drag there moves it.
     e.handle(
         Input::Move {
             x: at(100.0, 130.0).0,
@@ -224,7 +224,21 @@ fn select_move_resize_nudge_and_delete() {
         now(&e),
     );
     assert_eq!(e.cursor(), Cursor::Move);
-    drag(&mut e, at(100.0, 130.0), at(110.0, 140.0));
+    drag(&mut e, at(100.0, 130.0), at(105.0, 135.0));
+    assert_eq!(e.selected(), Some(0));
+
+    // So does its inside.
+    click(&mut e, at(300.0, 250.0));
+    e.handle(
+        Input::Move {
+            x: at(155.0, 140.0).0,
+            y: at(155.0, 140.0).1,
+            shift: false,
+        },
+        now(&e),
+    );
+    assert_eq!(e.cursor(), Cursor::Move);
+    drag(&mut e, at(155.0, 140.0), at(160.0, 145.0));
     assert_eq!(e.selected(), Some(0));
     assert_eq!(
         e.objects()[0].shape,
@@ -278,6 +292,24 @@ fn select_move_resize_nudge_and_delete() {
     ctrl(&mut e, 'z');
     assert_eq!(e.objects().len(), 1);
     assert_eq!(e.selected(), Some(0));
+}
+
+#[test]
+fn inside_a_shape_what_lies_in_it_wins() {
+    let mut e = editor();
+    drag(&mut e, at(100.0, 150.0), at(200.0, 150.0));
+    char(&mut e, 'r');
+    drag(&mut e, at(250.0, 50.0), at(300.0, 100.0));
+    drag(&mut e, at(20.0, 20.0), at(380.0, 280.0));
+    char(&mut e, 'v');
+
+    // The arrow under the big rect, the small rect in it, the big rect's own inside.
+    click(&mut e, at(150.0, 150.0));
+    assert_eq!(e.selected(), Some(0));
+    click(&mut e, at(275.0, 75.0));
+    assert_eq!(e.selected(), Some(1));
+    click(&mut e, at(60.0, 250.0));
+    assert_eq!(e.selected(), Some(2));
 }
 
 #[test]
@@ -696,6 +728,64 @@ fn a_notice_fades_in_and_out() {
     e.tick(t0 + NOTICE);
     assert!(e.notice.is_none() && e.notice_sprite.is_none());
     assert_eq!(e.next_deadline(), None);
+}
+
+#[test]
+fn the_drag_out_button_drags_the_file() {
+    let mut e = editor();
+    let t = now(&e);
+    let r = chrome::drag_out_rect(e.window(), 1.0);
+    let (x, y) = ((r.x + r.width / 2) as f32, (r.y + r.height / 2) as f32);
+    e.handle(Input::Move { x, y, shift: false }, t);
+    assert_eq!(e.cursor(), Cursor::Grab);
+    assert!(e.drag_sprite.is_some());
+
+    // A press that moves less than a drag's reach is still a click.
+    e.handle(Input::Down { x, y, shift: false }, t);
+    assert_eq!(e.cursor(), Cursor::Grabbing);
+    e.handle(
+        Input::Move {
+            x: x + 2.0,
+            y,
+            shift: false,
+        },
+        t,
+    );
+    assert!(e.take_requests().is_empty());
+    // The drag asks for the file once and leaves the edits alone.
+    e.handle(
+        Input::Move {
+            x: x + 12.0,
+            y: y - 8.0,
+            shift: false,
+        },
+        t,
+    );
+    e.handle(
+        Input::Move {
+            x: x + 40.0,
+            y: y - 30.0,
+            shift: false,
+        },
+        t,
+    );
+    assert_eq!(e.take_requests(), [Request::DragFile]);
+    assert!(e.objects().is_empty());
+    // The platform ran the drag; the button comes back as the pointer finds it.
+    e.handle(Input::DragEnded, t);
+    e.handle(Input::Move { x, y, shift: false }, t);
+    assert_eq!(e.cursor(), Cursor::Grab);
+    assert!(e.notice.is_none());
+
+    // A click only explains the button.
+    click(&mut e, (x, y));
+    assert!(e.take_requests().is_empty());
+    assert_eq!(e.notice.as_ref().map(|n| n.notice), Some(Notice::DragHint));
+    // A press on the button that ends elsewhere does nothing.
+    let mut e = editor();
+    e.handle(Input::Down { x, y, shift: false }, t);
+    e.handle(Input::Blur, t);
+    assert!(e.take_requests().is_empty() && e.notice.is_none());
 }
 
 /// Draws the whole window.

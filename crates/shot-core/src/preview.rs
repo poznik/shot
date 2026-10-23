@@ -29,7 +29,7 @@ const ICON_GAP: f32 = 6.0;
 const CLOSE: f32 = 24.0;
 const CLOSE_INSET: f32 = 8.0;
 const CLOSE_HIT: f32 = 32.0;
-/// From the work area's right and bottom edges, and the closest a card may come to its top.
+/// From the work area's side and bottom edges, and the closest a card may come to its top.
 const MARGIN: f32 = 16.0;
 const GAP: f32 = 8.0;
 const WHITE: Color = Color::hex(0xFFFF_FFFF);
@@ -81,6 +81,13 @@ impl Geometry {
         let half = CLOSE_HIT / 2.0 * self.scale;
         (x as f32 + 0.5 - cx).abs() <= half && (y as f32 + 0.5 - cy).abs() <= half
     }
+}
+
+/// The bottom corner of the work area the cards stack in.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Side {
+    Left,
+    Right,
 }
 
 /// What the card says under the thumbnail.
@@ -331,6 +338,7 @@ struct Entry {
     width: i32,
     height: i32,
     work: Rect,
+    side: Side,
     scale: f32,
     /// The card's top-left corner on screen.
     at: Point,
@@ -365,14 +373,15 @@ impl Stack {
         self.cards.is_empty()
     }
 
-    /// Adds a `width` × `height` card in the bottom-right corner of `work` and moves the others up.
-    /// It hides after `timeout`, or stays when `None`. When the column reaches the top of the
-    /// work area, the oldest cards there are dropped.
+    /// Adds a `width` × `height` card in the bottom corner of `work` on `side` and moves the
+    /// others there up. It hides after `timeout`, or stays when `None`. When the column reaches
+    /// the top of the work area, the oldest cards there are dropped.
     pub fn add(
         &mut self,
         now: Instant,
         (width, height): (i32, i32),
         work: Rect,
+        side: Side,
         scale: f32,
         timeout: Option<Duration>,
     ) -> u64 {
@@ -387,6 +396,7 @@ impl Stack {
             width,
             height,
             work,
+            side,
             scale,
             at: Point::new(0, 0),
             shown: now,
@@ -484,29 +494,38 @@ impl Stack {
         })
     }
 
-    /// Stacks each work area's cards upward from its bottom-right corner, newest at the bottom,
-    /// and drops the oldest ones that do not fit.
+    /// Stacks each work area's cards upward from their bottom corner, newest at the bottom, and
+    /// drops the oldest ones that do not fit. Cards in the two corners of one work area are two
+    /// columns.
     fn layout(&mut self) {
         let mut keep = vec![true; self.cards.len()];
-        let mut bottoms: Vec<(Rect, i32)> = Vec::new();
+        let mut bottoms: Vec<(Rect, Side, i32)> = Vec::new();
         for i in (0..self.cards.len()).rev() {
             let e = &mut self.cards[i];
             let s = e.scale;
-            let slot = match bottoms.iter_mut().find(|(w, _)| *w == e.work) {
+            let margin = scaled(MARGIN, s);
+            let slot = match bottoms
+                .iter_mut()
+                .find(|(w, side, _)| *w == e.work && *side == e.side)
+            {
                 Some(slot) => slot,
                 None => {
-                    bottoms.push((e.work, e.work.bottom() - scaled(MARGIN, s)));
+                    bottoms.push((e.work, e.side, e.work.bottom() - margin));
                     bottoms.last_mut().expect("just pushed")
                 }
             };
-            let first = slot.1 == e.work.bottom() - scaled(MARGIN, s);
-            let top = slot.1 - e.height;
-            if !first && top < e.work.y + scaled(MARGIN, s) {
+            let first = slot.2 == e.work.bottom() - margin;
+            let top = slot.2 - e.height;
+            if !first && top < e.work.y + margin {
                 keep[i] = false;
                 continue;
             }
-            e.at = Point::new(e.work.right() - scaled(MARGIN, s) - e.width, top);
-            slot.1 = top - scaled(GAP, s);
+            let x = match e.side {
+                Side::Left => e.work.x + margin,
+                Side::Right => e.work.right() - margin - e.width,
+            };
+            e.at = Point::new(x, top);
+            slot.2 = top - scaled(GAP, s);
         }
         let mut keep = keep.into_iter();
         self.cards.retain(|_| keep.next().unwrap_or(true));
@@ -598,15 +617,15 @@ mod tests {
         let now = Instant::now();
         let mut s = Stack::default();
         let five = Some(Duration::from_secs(5));
-        let a = s.add(now, (248, 167), WORK, 1.0, five);
+        let a = s.add(now, (248, 167), WORK, Side::Right, 1.0, five);
         assert_eq!(ats(&s, now), [(a, Point::new(736, 417))]);
-        let b = s.add(now, (248, 167), WORK, 1.0, five);
+        let b = s.add(now, (248, 167), WORK, Side::Right, 1.0, five);
         assert_eq!(
             ats(&s, now),
             [(a, Point::new(736, 242)), (b, Point::new(736, 417))]
         );
-        let c = s.add(now, (248, 167), WORK, 1.0, five);
-        let d = s.add(now, (248, 167), WORK, 1.0, five);
+        let c = s.add(now, (248, 167), WORK, Side::Right, 1.0, five);
+        let d = s.add(now, (248, 167), WORK, Side::Right, 1.0, five);
         // A fourth card would cross 16 px from the top: the oldest goes.
         assert_eq!(
             ats(&s, now),
@@ -620,11 +639,46 @@ mod tests {
     }
 
     #[test]
+    fn the_left_corner_is_a_column_of_its_own() {
+        let now = Instant::now();
+        let mut s = Stack::default();
+        let five = Some(Duration::from_secs(5));
+        let work = Rect::new(-1000, 40, 1000, 600);
+        let a = s.add(now, (248, 167), work, Side::Left, 1.0, five);
+        assert_eq!(ats(&s, now), [(a, Point::new(-984, 457))]);
+        // A card on the right starts at the bottom; the left column stays as it was.
+        let b = s.add(now, (248, 167), work, Side::Right, 1.0, five);
+        let c = s.add(now, (248, 167), work, Side::Left, 1.0, five);
+        assert_eq!(
+            ats(&s, now),
+            [
+                (a, Point::new(-984, 282)),
+                (b, Point::new(-264, 457)),
+                (c, Point::new(-984, 457))
+            ]
+        );
+    }
+
+    #[test]
     fn hover_pauses_timers_and_the_layout() {
         let t0 = Instant::now();
         let mut s = Stack::default();
-        let a = s.add(t0, (248, 167), WORK, 1.0, Some(Duration::from_secs(5)));
-        let b = s.add(t0, (248, 100), WORK, 1.0, Some(Duration::from_secs(1)));
+        let a = s.add(
+            t0,
+            (248, 167),
+            WORK,
+            Side::Right,
+            1.0,
+            Some(Duration::from_secs(5)),
+        );
+        let b = s.add(
+            t0,
+            (248, 100),
+            WORK,
+            Side::Right,
+            1.0,
+            Some(Duration::from_secs(1)),
+        );
         assert_eq!(s.next_deadline(t0), Some(t0 + FRAME));
         assert_eq!(
             s.placed(t0 + FADE).map(|p| p.alpha).collect::<Vec<_>>(),
@@ -653,7 +707,14 @@ mod tests {
     fn a_failed_card_stays() {
         let t0 = Instant::now();
         let mut s = Stack::default();
-        let a = s.add(t0, (248, 167), WORK, 1.0, Some(Duration::from_secs(5)));
+        let a = s.add(
+            t0,
+            (248, 167),
+            WORK,
+            Side::Right,
+            1.0,
+            Some(Duration::from_secs(5)),
+        );
         s.keep(a);
         s.update(t0 + Duration::from_secs(60));
         assert_eq!(s.placed(t0).count(), 1);

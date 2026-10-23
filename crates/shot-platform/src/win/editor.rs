@@ -9,6 +9,7 @@
 
 use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
+use std::path::{Path, PathBuf};
 use std::ptr::{addr_of, addr_of_mut};
 use std::rc::Rc;
 use std::sync::Once;
@@ -17,11 +18,11 @@ use std::time::Duration;
 use shot_core::editor::objects::Axis;
 use shot_core::editor::{Cursor, Input, Key};
 use shot_core::geom::Rect;
-use shot_core::image::BgrxMut;
+use shot_core::image::{BgrxMut, BgrxView};
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows::Win32::Graphics::Dwm::{DWMWA_USE_IMMERSIVE_DARK_MODE, DwmSetWindowAttribute};
 use windows::Win32::Graphics::Gdi::{
-    BeginPaint, BitBlt, EndPaint, GetDC, InvalidateRect, PAINTSTRUCT, ReleaseDC, SRCCOPY,
+    BeginPaint, BitBlt, EndPaint, GetDC, InvalidateRect, PAINTSTRUCT, PtInRect, ReleaseDC, SRCCOPY,
     ScreenToClient,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
@@ -33,8 +34,8 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateIconFromResourceEx, CreateWindowExW, DefWindowProcW, DestroyIcon, DestroyWindow,
-    GWLP_USERDATA, GetClientRect, GetWindowLongPtrW, HCURSOR, HICON, HTCLIENT, ICON_BIG,
-    ICON_SMALL, IDC_ARROW, IDC_CROSS, IDC_HAND, IDC_SIZEALL, IDC_SIZENESW, IDC_SIZENS,
+    GWLP_USERDATA, GetClientRect, GetCursorPos, GetWindowLongPtrW, HCURSOR, HICON, HTCLIENT,
+    ICON_BIG, ICON_SMALL, IDC_ARROW, IDC_CROSS, IDC_HAND, IDC_SIZEALL, IDC_SIZENESW, IDC_SIZENS,
     IDC_SIZENWSE, IDC_SIZEWE, IsIconic, IsWindow, KillTimer, LR_DEFAULTCOLOR, LoadCursorW,
     MINMAXINFO, PostMessageW, RegisterClassW, SIZE_MINIMIZED, SW_RESTORE, SW_SHOWNORMAL,
     SWP_NOACTIVATE, SWP_NOZORDER, SendMessageW, SetCursor, SetForegroundWindow, SetTimer,
@@ -47,6 +48,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use windows::core::{HSTRING, PCWSTR, w};
 
 use super::Bitmap;
+use super::drag::{self, DragImage};
 use super::system::apps_use_dark_theme;
 
 const CLASS: PCWSTR = w!("ShotEditor");
@@ -65,20 +67,36 @@ const MIN_SIZE: (f32, f32) = (960.0, 600.0);
 const WHEEL_SCROLL: f32 = 48.0;
 const WHEEL_DELTA: i32 = 120;
 
-/// The app icon at the sizes a title bar and the taskbar use.
-const ICONS: [(i32, &[u8]); 6] = [
+/// The flat app icon at the sizes a title bar uses.
+const SMALL_ICONS: [(i32, &[u8]); 6] = [
     (
         16,
-        include_bytes!("../../../../assets/app/windows/app-16.png"),
+        include_bytes!("../../../../assets/app/windows/app-flat-16.png"),
     ),
     (
         20,
-        include_bytes!("../../../../assets/app/windows/app-20.png"),
+        include_bytes!("../../../../assets/app/windows/app-flat-20.png"),
     ),
     (
         24,
-        include_bytes!("../../../../assets/app/windows/app-24.png"),
+        include_bytes!("../../../../assets/app/windows/app-flat-24.png"),
     ),
+    (
+        32,
+        include_bytes!("../../../../assets/app/windows/app-flat-32.png"),
+    ),
+    (
+        40,
+        include_bytes!("../../../../assets/app/windows/app-flat-40.png"),
+    ),
+    (
+        48,
+        include_bytes!("../../../../assets/app/windows/app-flat-48.png"),
+    ),
+];
+
+/// The volumetric app icon at the sizes the taskbar and Alt+Tab use.
+const BIG_ICONS: [(i32, &[u8]); 4] = [
     (
         32,
         include_bytes!("../../../../assets/app/windows/app-32.png"),
@@ -91,6 +109,10 @@ const ICONS: [(i32, &[u8]); 6] = [
         48,
         include_bytes!("../../../../assets/app/windows/app-48.png"),
     ),
+    (
+        64,
+        include_bytes!("../../../../assets/app/windows/app-64.png"),
+    ),
 ];
 
 pub enum WindowEvent {
@@ -99,6 +121,9 @@ pub enum WindowEvent {
     Timer,
     /// [`EditorNotifier::notify`] was called.
     Notify,
+    /// The drag of [`EditorWindow::drag_file`] is over, or did not start: tell the editor
+    /// [`Input::DragEnded`].
+    DragEnded(windows::core::Result<()>),
 }
 
 /// Owns the editor; gets every event of its window. After [`Input::Resize`] — also the first
@@ -125,6 +150,8 @@ struct Flags {
     dark: Cell<bool>,
     follow_system: Cell<bool>,
     closing: Cell<bool>,
+    /// The file to drag once the handler returns, and what the drag shows.
+    drag: RefCell<Option<(PathBuf, Option<DragImage>)>>,
 }
 
 /// The window as its handler sees it.
@@ -248,6 +275,7 @@ impl EditorWindow {
             dark: Cell::new(dark),
             follow_system: Cell::new(follow_system),
             closing: Cell::new(false),
+            drag: RefCell::new(None),
         });
         let mut window = EditorWindow {
             hwnd,
@@ -326,6 +354,13 @@ impl EditorWindow {
         self.flags.closing.set(true);
     }
 
+    /// Drags the file at `path` out of the window once the handler returns, as Explorer does,
+    /// with `image` under the cursor; ask while the left button is down. The handler gets
+    /// [`WindowEvent::DragEnded`] when the drag is over; meanwhile its other events come as usual.
+    pub fn drag_file(&self, path: &Path, image: Option<BgrxView>) {
+        *self.flags.drag.borrow_mut() = Some((path.to_path_buf(), image.map(DragImage::new)));
+    }
+
     fn set_icons(&mut self) {
         self.icons = set_icons(self.hwnd, self.flags.scale.get());
     }
@@ -342,12 +377,15 @@ impl Drop for EditorWindow {
 /// Gives `hwnd` the app icon for its title bar and the taskbar; the window destroys them.
 pub(super) fn set_icons(hwnd: HWND, scale: f32) -> Vec<HICON> {
     let mut icons = Vec::new();
-    for (kind, size) in [(ICON_SMALL, 16.0), (ICON_BIG, 32.0)] {
+    for (kind, size, set) in [
+        (ICON_SMALL, 16.0, &SMALL_ICONS[..]),
+        (ICON_BIG, 32.0, &BIG_ICONS[..]),
+    ] {
         let px = (size * scale).round() as i32;
-        let &(px, png) = ICONS
+        let &(px, png) = set
             .iter()
             .find(|(s, _)| *s >= px)
-            .unwrap_or(&ICONS[ICONS.len() - 1]);
+            .unwrap_or(&set[set.len() - 1]);
         if let Ok(icon) =
             unsafe { CreateIconFromResourceEx(png, true, 0x0003_0000, px, px, LR_DEFAULTCOLOR) }
         {
@@ -507,6 +545,41 @@ unsafe fn dispatch(hwnd: HWND, host: *mut Host, event: WindowEvent) {
         }
         if flags.repaint.take() {
             let _ = InvalidateRect(Some(hwnd), None, false);
+        }
+        let drag = flags.drag.borrow_mut().take();
+        if let Some((path, image)) = drag {
+            drag_file(hwnd, host, &flags, &path, image.as_ref());
+        }
+    }
+}
+
+/// Runs the drag the handler asked for, then tells it where the pointer is now.
+unsafe fn drag_file(
+    hwnd: HWND,
+    host: *mut Host,
+    flags: &Flags,
+    path: &Path,
+    image: Option<&DragImage>,
+) {
+    unsafe {
+        // The drag takes the mouse from here: that is not a lost press.
+        flags.captured.set(false);
+        let _ = ReleaseCapture();
+        let result = drag::drag_file(hwnd, path, image);
+        dispatch(hwnd, host, WindowEvent::DragEnded(result));
+        // The drag loop ate the mouse's messages, and with them the hover's tracking.
+        flags.tracking.set(false);
+        let mut p = POINT::default();
+        let mut r = RECT::default();
+        let inside = GetCursorPos(&mut p).is_ok()
+            && ScreenToClient(hwnd, &mut p).as_bool()
+            && GetClientRect(hwnd, &mut r).is_ok()
+            && PtInRect(&r, p).as_bool();
+        if inside {
+            let lp = (p.x as u16 as isize) | ((p.y as u16 as isize) << 16);
+            let _ = PostMessageW(Some(hwnd), WM_MOUSEMOVE, WPARAM(0), LPARAM(lp));
+        } else {
+            dispatch(hwnd, host, WindowEvent::Input(Input::Leave));
         }
     }
 }

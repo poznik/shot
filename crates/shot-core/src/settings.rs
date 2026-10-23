@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 use toml::{Table, Value};
 
 use crate::hotkey::{Hotkey, Os};
+use crate::preview::Side;
 
 /// The overlay's key hint is shown for this many captures (`docs/design/overlay-preview.md`).
 pub const HINT_CAPTURES: u32 = 5;
@@ -47,6 +48,8 @@ pub struct Settings {
     pub preview: bool,
     /// How long a preview card stays, 1–60 s; the settings window offers 3, 5 and 10.
     pub preview_seconds: u32,
+    /// The bottom corner the preview cards stack in.
+    pub preview_side: Side,
     pub theme: ThemeChoice,
     /// The first-run welcome was shown.
     pub welcomed: bool,
@@ -62,6 +65,7 @@ impl Settings {
             folder: None,
             preview: true,
             preview_seconds: 5,
+            preview_side: Side::Left,
             theme: ThemeChoice::System,
             welcomed: false,
             captures: 0,
@@ -108,6 +112,14 @@ impl Settings {
                         .filter(|n| (1..=60).contains(n))
                         .map(|n| n as u32),
                 ),
+                "preview_side" => set(
+                    &mut s.preview_side,
+                    match value.as_str() {
+                        Some("left") => Some(Side::Left),
+                        Some("right") => Some(Side::Right),
+                        _ => None,
+                    },
+                ),
                 "theme" => set(
                     &mut s.theme,
                     match value.as_str() {
@@ -151,6 +163,10 @@ impl Settings {
             Destination::File => "file",
             Destination::Both => "both",
         };
+        let side = match self.preview_side {
+            Side::Left => "left",
+            Side::Right => "right",
+        };
         let theme = match self.theme {
             ThemeChoice::System => "system",
             ThemeChoice::Light => "light",
@@ -167,6 +183,8 @@ impl Settings {
              folder = {folder}\n\
              preview = {preview}\n\
              preview_seconds = {seconds}\n\
+             # left or right: the bottom corner the preview appears in\n\
+             preview_side = \"{side}\"\n\
              # system, light or dark\n\
              theme = \"{theme}\"\n\
              \n\
@@ -230,6 +248,7 @@ mod tests {
                 folder: Some(PathBuf::from(r#"D:\Скриншоты "мои"\Shot"#)),
                 preview: false,
                 preview_seconds: 10,
+                preview_side: Side::Right,
                 theme: ThemeChoice::Dark,
                 welcomed: true,
                 captures: 3,
@@ -259,15 +278,16 @@ mod tests {
     #[test]
     fn bad_value_falls_back_alone() {
         let text = "hotkey = \"Ctrl+Hyper+X\"\nafter_capture = \"clipboard\"\npreview_seconds = 0\n\
-                    theme = 7\nfuture_key = 1\ncaptures = 99\n";
+                    preview_side = \"top\"\ntheme = 7\nfuture_key = 1\ncaptures = 99\n";
         let (s, problems) = Settings::parse(text, Os::Windows);
         assert_eq!(s.hotkey, Hotkey::default_for(Os::Windows));
         assert_eq!(s.destination, Destination::Clipboard);
         assert_eq!(s.preview_seconds, 5);
+        assert_eq!(s.preview_side, Side::Left);
         assert_eq!(s.theme, ThemeChoice::System);
         assert_eq!(s.captures, HINT_CAPTURES);
         assert!(!s.show_key_hint());
-        assert_eq!(problems.len(), 3, "{problems:?}");
+        assert_eq!(problems.len(), 4, "{problems:?}");
     }
 
     #[test]

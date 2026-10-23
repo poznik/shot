@@ -257,10 +257,13 @@ impl App {
         };
         let card = Card::new(image, corner.scale, status, Some("Открыть в редакторе"))?;
         let timeout = Duration::from_secs(self.settings.preview_seconds as u64);
-        Some(
-            self.previews
-                .add(card, corner.work, timeout, self.settings.preview),
-        )
+        Some(self.previews.add(
+            card,
+            corner.work,
+            self.settings.preview_side,
+            timeout,
+            self.settings.preview,
+        ))
     }
 
     /// Shows the tray menu and runs the chosen command.
@@ -375,6 +378,7 @@ impl App {
             folder: self.out_dir().display().to_string(),
             preview: self.settings.preview,
             preview_seconds: self.settings.preview_seconds,
+            preview_side: self.settings.preview_side,
             autostart: sys::autostart(),
             theme: self.settings.theme,
         }
@@ -477,6 +481,7 @@ impl App {
             }
             Request::Preview(on) => self.settings.preview = on,
             Request::PreviewSeconds(n) => self.settings.preview_seconds = n,
+            Request::PreviewSide(side) => self.settings.preview_side = side,
             Request::Autostart(on) => return set_autostart(on),
             Request::Theme(theme) => {
                 self.settings.theme = theme;

@@ -5,6 +5,7 @@ mod autostart;
 mod capture;
 mod clipboard;
 mod dialog;
+mod drag;
 mod editor;
 mod form;
 mod hotkey;

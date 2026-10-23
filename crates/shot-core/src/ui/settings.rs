@@ -1,5 +1,5 @@
-//! The settings window (`docs/design/settings.md`, "Settings window", "Hotkey recorder"): six rows
-//! that change the settings at once, one of them recording a new hotkey.
+//! The settings window (`docs/design/settings.md`, "Settings window", "Hotkey recorder"): seven
+//! rows that change the settings at once, one of them recording a new hotkey.
 
 use tiny_skia::Pixmap;
 
@@ -10,6 +10,7 @@ use crate::geom::Rect;
 use crate::hotkey::{Hotkey, Os, modifier_caps};
 use crate::icons::{self, Icon};
 use crate::image::BgrxMut;
+use crate::preview::Side;
 use crate::settings::{Destination, ThemeChoice};
 use crate::theme::{
     Palette, TYPE_BODY, TYPE_BODY_STRONG, TYPE_CAPTION, TYPE_HEADLINE, scaled, stroke,
@@ -44,6 +45,7 @@ const DESTINATIONS: [(&str, Destination); 3] = [
     ("Буфер и файл", Destination::Both),
 ];
 const SECONDS: [(&str, u32); 3] = [("3 с", 3), ("5 с", 5), ("10 с", 10)];
+const SIDES: [(&str, Side); 2] = [("Слева", Side::Left), ("Справа", Side::Right)];
 const THEMES: [(&str, ThemeChoice); 3] = [
     ("Как в системе", ThemeChoice::System),
     ("Светлая", ThemeChoice::Light),
@@ -51,11 +53,12 @@ const THEMES: [(&str, ThemeChoice); 3] = [
 ];
 
 /// The rows, top to bottom, with their labels and hints; the folder row's hint is the folder.
-const ROWS: [(Row, &str, &str); 6] = [
+const ROWS: [(Row, &str, &str); 7] = [
     (Row::Hotkey, "Хоткей", "Снять область, окно или экран"),
     (Row::Destination, "После снимка", "Куда отправить снимок"),
     (Row::Folder, "Папка", ""),
     (Row::Preview, "Превью", "Карточка в углу после снимка"),
+    (Row::PreviewSide, "Угол превью", "Нижний угол экрана"),
     (
         Row::Autostart,
         "Автозапуск",
@@ -70,6 +73,7 @@ enum Row {
     Destination,
     Folder,
     Preview,
+    PreviewSide,
     Autostart,
     Theme,
 }
@@ -81,6 +85,7 @@ enum Ctl {
     Folder,
     PreviewSeconds,
     Preview,
+    PreviewSide,
     Autostart,
     Theme,
 }
@@ -96,6 +101,7 @@ pub struct Values {
     pub folder: String,
     pub preview: bool,
     pub preview_seconds: u32,
+    pub preview_side: Side,
     pub autostart: bool,
     pub theme: ThemeChoice,
 }
@@ -115,6 +121,7 @@ pub enum Request {
     PickFolder,
     Preview(bool),
     PreviewSeconds(u32),
+    PreviewSide(Side),
     Autostart(bool),
     Theme(ThemeChoice),
 }
@@ -149,9 +156,9 @@ pub struct SettingsWindow {
 #[derive(Clone, Debug, Default)]
 struct Layout {
     /// Each row's top, below its divider.
-    rows: [i32; 6],
+    rows: [i32; ROWS.len()],
     /// Where each row's controls begin.
-    controls: [i32; 6],
+    controls: [i32; ROWS.len()],
     /// The footer's divider.
     footer: i32,
     height: i32,
@@ -334,6 +341,13 @@ impl SettingsWindow {
                 }
                 _ => return,
             },
+            Act::Select(Ctl::PreviewSide, i) => match SIDES.get(i) {
+                Some(&(_, side)) if side != v.preview_side => {
+                    v.preview_side = side;
+                    Request::PreviewSide(side)
+                }
+                _ => return,
+            },
             Act::Select(Ctl::Theme, i) => match THEMES.get(i) {
                 Some(&(_, t)) if t != v.theme => {
                     v.theme = t;
@@ -491,6 +505,13 @@ impl SettingsWindow {
                     slots.push(seconds);
                     slots.push(flip);
                 }
+                // Stays enabled with the preview off: a failed save still shows its card.
+                Row::PreviewSide => slots.push(segmented(
+                    Ctl::PreviewSide,
+                    right,
+                    &labels(&SIDES),
+                    SIDES.iter().position(|d| d.1 == v.preview_side),
+                )),
                 Row::Autostart => slots.push(toggle(Ctl::Autostart, v.autostart)),
                 Row::Theme => slots.push(segmented(
                     Ctl::Theme,
@@ -625,6 +646,7 @@ impl SettingsWindow {
                     let names = match id {
                         Ctl::Destination => labels(&DESTINATIONS),
                         Ctl::PreviewSeconds => labels(&SECONDS),
+                        Ctl::PreviewSide => labels(&SIDES),
                         _ => labels(&THEMES),
                     };
                     widgets::segmented(
@@ -705,6 +727,7 @@ mod tests {
             folder: r"C:\Users\Someone\Pictures\Shot".to_string(),
             preview: true,
             preview_seconds: 5,
+            preview_side: Side::Left,
             autostart: false,
             theme: ThemeChoice::System,
         }
@@ -743,9 +766,9 @@ mod tests {
     #[test]
     fn height_follows_the_rows() {
         let mut w = window(1.0);
-        assert_eq!(w.content_size(), (560, 473));
+        assert_eq!(w.content_size(), (560, 530));
         w.hotkey_refused(hotkey::Hotkey::parse("Ctrl+Alt+S").unwrap(), true);
-        assert_eq!(w.content_size(), (560, 497));
+        assert_eq!(w.content_size(), (560, 554));
         assert_eq!(window(1.5).content_size().0, 840);
     }
 
@@ -873,6 +896,10 @@ mod tests {
         let label = w.form.slot(Ctl::Preview).unwrap().label.unwrap();
         click(&mut w, Rect::new(label.x, label.y, 20, label.height));
         assert!(!w.form.slot(Ctl::PreviewSeconds).unwrap().enabled);
+        // The corner stays: a failed save still shows its card.
+        let sides = w.form.slot(Ctl::PreviewSide).unwrap().parts.clone();
+        click(&mut w, sides[1]);
+        click(&mut w, sides[1]);
         assert_eq!(
             w.take_requests(),
             [
@@ -880,8 +907,10 @@ mod tests {
                 Request::Theme(ThemeChoice::Dark),
                 Request::PickFolder,
                 Request::Preview(false),
+                Request::PreviewSide(Side::Right),
             ]
         );
+        assert_eq!(w.values().preview_side, Side::Right);
     }
 
     #[test]

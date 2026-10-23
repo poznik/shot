@@ -71,7 +71,7 @@ Theme-independent, drawn over the image in the editor (see [editor.md](editor.md
 
 | Token | Value | Use |
 |---|---|---|
-| `selection` | `#4651F6` | Hover outline, selection box, handle ring |
+| `selection` | `#4651F6` | Hover outline, handle ring |
 | `selection.handle-fill` | `#FFFFFF` | Handle fill |
 
 ## Annotations
@@ -108,7 +108,8 @@ a dark IDE.
 - Widths are in image pixels at 100%: in the saved image, width = token × the scale factor of the
   monitor the screenshot came from. At 200%, M is 8 px in the file and looks like 4 on screen.
 - Counter glyphs are Inter Semi Bold with tabular digits.
-- Arrowhead: length `3w + 10`, half-width `length × 0.5`. The exact arrow form is in [editor.md](editor.md#objects).
+- Arrowhead: length `3w + 10`, half-width `length × 0.5`, neck `length × 0.68` back from the tip;
+  the shaft widens from `w/2` to `1.5w`. The exact arrow form is in [editor.md](editor.md#objects).
 
 ## Typography
 
@@ -187,7 +188,7 @@ Tool icons live in [`assets/icons/`](../../assets/icons/) as SVG:
 - At 16 px, scale the geometry and keep the stroke at 1.5.
 
 Editor tools: `select`, `arrow`, `line`, `rectangle`, `ellipse`, `counter-number`,
-`counter-letter`, `undo`, `redo`, `copy`, `save`, `close`. Preview status row (at 16 px): `check`,
-`alert`, `edit`, plus `copy` and `save`.
+`counter-letter`, `undo`, `redo`, `copy`, `save`, `close`; the drag-out button: `image`. Preview
+status row (at 16 px): `check`, `alert`, `edit`, plus `copy` and `save`.
 
 The app icon and the tray icon are not tool icons: see [icons.md](icons.md).

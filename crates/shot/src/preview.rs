@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 
 use shot_core::draw::Pixmap;
 use shot_core::geom::{Point, Rect};
-use shot_core::preview::{Card, Placed, Stack, Status, failure_reason};
+use shot_core::preview::{Card, Placed, Side, Stack, Status, failure_reason};
 use shot_core::theme::Palette;
 use shot_platform::sys::{self, Notifier, PreviewEvent, PreviewWindows, Sprite};
 #[cfg(windows)]
@@ -23,7 +23,7 @@ pub struct Previews {
     windows: PreviewWindows,
     shown: Vec<Shown>,
     /// Cards not on screen because previews are off: shown only if their save fails.
-    waiting: Vec<(u64, Card, Rect)>,
+    waiting: Vec<(u64, Card, Rect, Side)>,
     next_key: u64,
     dark: bool,
     saved_tx: Sender<(u64, io::Result<Source>)>,
@@ -115,20 +115,27 @@ impl Previews {
         }
     }
 
-    /// Adds `card` to the stack in the corner of `work`, or, when `visible` is false, keeps it
-    /// until its save reports back. Returns the key the save reports with.
-    pub fn add(&mut self, card: Card, work: Rect, timeout: Duration, visible: bool) -> u64 {
+    /// Adds `card` to the stack in the bottom corner of `work` on `side`, or, when `visible` is
+    /// false, keeps it until its save reports back. Returns the key the save reports with.
+    pub fn add(
+        &mut self,
+        card: Card,
+        work: Rect,
+        side: Side,
+        timeout: Duration,
+        visible: bool,
+    ) -> u64 {
         self.next_key += 1;
         let key = self.next_key;
         if visible {
-            self.put(key, card, work, Some(timeout));
+            self.put(key, card, work, side, Some(timeout));
         } else {
-            self.waiting.push((key, card, work));
+            self.waiting.push((key, card, work, side));
         }
         key
     }
 
-    fn put(&mut self, key: u64, card: Card, work: Rect, timeout: Option<Duration>) {
+    fn put(&mut self, key: u64, card: Card, work: Rect, side: Side, timeout: Option<Duration>) {
         let slot = match self.windows.acquire() {
             Ok(slot) => slot,
             Err(e) => return log!("preview window: {e}"),
@@ -138,7 +145,7 @@ impl Previews {
         let timeout = timeout.filter(|_| !card.status.stays());
         let id = self
             .stack
-            .add(now, (g.width, g.height), work, g.scale, timeout);
+            .add(now, (g.width, g.height), work, side, g.scale, timeout);
         self.shown.push(Shown {
             key,
             id,
@@ -234,13 +241,13 @@ impl Previews {
                     }
                 }
             } else if let Some(i) = self.waiting.iter().position(|w| w.0 == key) {
-                let (key, mut card, work) = self.waiting.remove(i);
+                let (key, mut card, work, side) = self.waiting.remove(i);
                 if let Err(e) = result {
                     card.status = Status::Failed {
                         reason: failure_reason(&e),
                     };
                     card.action = None;
-                    self.put(key, card, work, None);
+                    self.put(key, card, work, side, None);
                 }
             }
         }

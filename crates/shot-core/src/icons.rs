@@ -21,6 +21,7 @@ pub enum Icon {
     CounterNumber,
     Edit,
     Ellipse,
+    Image,
     Line,
     Rectangle,
     Redo,
@@ -29,7 +30,7 @@ pub enum Icon {
     Undo,
 }
 
-const ALL: [Icon; 15] = [
+const ALL: [Icon; 16] = [
     Icon::Alert,
     Icon::Arrow,
     Icon::Check,
@@ -39,6 +40,7 @@ const ALL: [Icon; 15] = [
     Icon::CounterNumber,
     Icon::Edit,
     Icon::Ellipse,
+    Icon::Image,
     Icon::Line,
     Icon::Rectangle,
     Icon::Redo,
@@ -63,6 +65,7 @@ impl Icon {
             Icon::CounterNumber => include_str!("../../../assets/icons/counter-number.svg"),
             Icon::Edit => include_str!("../../../assets/icons/edit.svg"),
             Icon::Ellipse => include_str!("../../../assets/icons/ellipse.svg"),
+            Icon::Image => include_str!("../../../assets/icons/image.svg"),
             Icon::Line => include_str!("../../../assets/icons/line.svg"),
             Icon::Rectangle => include_str!("../../../assets/icons/rectangle.svg"),
             Icon::Redo => include_str!("../../../assets/icons/redo.svg"),

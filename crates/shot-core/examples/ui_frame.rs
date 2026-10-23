@@ -17,6 +17,7 @@ use std::time::{Duration, Instant};
 
 use shot_core::hotkey::{Hotkey, Os};
 use shot_core::image::{BgrxMut, BgrxView, Compression, encode_png};
+use shot_core::preview::Side;
 use shot_core::settings::{Destination, ThemeChoice};
 use shot_core::ui::settings::Values;
 use shot_core::ui::{Input, Permission, SettingsWindow, Welcome};
@@ -46,6 +47,7 @@ fn values(os: Os) -> Values {
         folder: r"C:\Users\Someone\Pictures\Shot".to_string(),
         preview: true,
         preview_seconds: 5,
+        preview_side: Side::Left,
         autostart: true,
         theme: ThemeChoice::System,
     }

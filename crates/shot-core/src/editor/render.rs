@@ -6,7 +6,7 @@ use tiny_skia::{
     FillRule, IntRect, LineCap, LineJoin, Paint, Path, PathBuilder, Pixmap, Rect, Stroke, Transform,
 };
 
-use super::objects::{HANDLE_FILL, Object, Pt, SELECTION, Shape, arrow_parts};
+use super::objects::{HANDLE_FILL, Object, Pt, SELECTION, Shape, arrow_outline};
 use crate::canvas::skia_color;
 use crate::text::{self, Weight};
 use crate::theme::{Color, stroke};
@@ -33,15 +33,6 @@ pub fn draw_object(pixmap: &mut Pixmap, o: &Object, k: f32, t: Transform, hover:
     if hover {
         for part in &halo {
             draw_part(pixmap, part, SELECTION, t);
-        }
-    } else if let Shape::Arrow { a, b } = o.shape {
-        // The shaft's halo runs under the head's: one outline of both, filled once, so the
-        // overlap does not get darker.
-        let s = o.sizes(k);
-        let (shaft, tri) = arrow_parts(a, b, s.head);
-        let outline = arrow_halo(shaft, tri, s.stroke / 2.0 + s.halo, s.stroke / 4.0 + s.halo);
-        if let Some(path) = outline {
-            draw_part(pixmap, &Part::Fill(path), swatch.halo, t);
         }
     } else {
         for part in &halo {
@@ -84,25 +75,19 @@ fn parts(o: &Object, k: f32) -> (Vec<Part>, Vec<Part>) {
             )
         }
         Shape::Arrow { a, b } => {
-            let (shaft, tri) = arrow_parts(a, b, s.head);
-            let mut body = Vec::new();
-            let mut halo = Vec::new();
-            if let Some(path) = shaft.and_then(|(a, b)| segment(a, b)) {
-                body.push(stroke(&path, w, true));
-                halo.push(stroke(&path, w + 2.0 * h, true));
-            }
-            let mut pb = PathBuilder::new();
-            pb.move_to(tri[0].x, tri[0].y);
-            pb.line_to(tri[1].x, tri[1].y);
-            pb.line_to(tri[2].x, tri[2].y);
-            pb.close();
-            if let Some(path) = pb.finish() {
-                body.push(Part::Fill(path.clone()));
-                body.push(stroke(&path, w / 2.0, false));
-                halo.push(Part::Fill(path.clone()));
-                halo.push(stroke(&path, w / 2.0 + 2.0 * h, false));
-            }
-            (body, halo)
+            let Some(outline) = arrow_outline(a, b, w, s.head) else {
+                return (Vec::new(), Vec::new());
+            };
+            // One path each, filled once: the halo does not get darker where parts would overlap.
+            let grown = |r: f32| {
+                let mut pb = PathBuilder::new();
+                push_grown(&mut pb, &outline, r);
+                pb.finish().map(Part::Fill)
+            };
+            (
+                grown(w / 4.0).into_iter().collect(),
+                grown(w / 4.0 + h).into_iter().collect(),
+            )
         }
         Shape::Rect { a, b } | Shape::Ellipse { a, b } => {
             let Some(rect) =
@@ -187,20 +172,8 @@ fn draw_part(pixmap: &mut Pixmap, part: &Part, color: Color, t: Transform) {
     }
 }
 
-/// The arrow's halo as one path: the shaft grown by `shaft_r` with round ends, and the head
-/// grown by `head_r` with round corners, wound the same way so a nonzero fill covers their
-/// overlap once.
-fn arrow_halo(shaft: Option<(Pt, Pt)>, tri: [Pt; 3], shaft_r: f32, head_r: f32) -> Option<Path> {
-    let mut pb = PathBuilder::new();
-    if let Some((a, b)) = shaft {
-        push_grown(&mut pb, &[a, b], shaft_r);
-    }
-    push_grown(&mut pb, &tri, head_r);
-    pb.finish()
-}
-
-/// The convex polygon `points` grown by `r` with round corners; two points make a capsule.
-/// Wound so the shoelace area is positive.
+/// The simple polygon `points` grown by `r`: round at its convex corners, sharp at its concave
+/// ones, where the grown edges meet. Wound so the shoelace area is positive.
 fn push_grown(pb: &mut PathBuilder, points: &[Pt], r: f32) {
     let n = points.len();
     let area: f32 = (0..n)
@@ -223,16 +196,26 @@ fn push_grown(pb: &mut PathBuilder, points: &[Pt], r: f32) {
         }
         normals.push(Pt::new(e.y / len, -e.x / len));
     }
-    let start = p[0] + normals[n - 1] * r;
-    pb.move_to(start.x, start.y);
+    // Each corner from where the previous grown edge ends; the close runs along the last edge.
     for i in 0..n {
         let from = normals[(i + n - 1) % n];
         let to = normals[i];
         let a0 = from.y.atan2(from.x);
         let sweep = (to.y.atan2(to.x) - a0).rem_euclid(std::f32::consts::TAU);
-        push_arc(pb, p[i], r, a0, sweep);
-        let end = p[(i + 1) % n] + to * r;
-        pb.line_to(end.x, end.y);
+        let concave = sweep > std::f32::consts::PI;
+        let start = if concave {
+            p[i] + (from + to) * (r / (1.0 + from.x * to.x + from.y * to.y))
+        } else {
+            p[i] + from * r
+        };
+        if i == 0 {
+            pb.move_to(start.x, start.y);
+        } else {
+            pb.line_to(start.x, start.y);
+        }
+        if !concave {
+            push_arc(pb, p[i], r, a0, sweep);
+        }
     }
     pb.close();
 }
@@ -293,29 +276,6 @@ pub fn draw_handles(pixmap: &mut Pixmap, points: &[(f32, f32)], scale: f32) {
 /// The handle hit area's half side, in px of a monitor at `scale`.
 pub fn handle_reach(scale: f32) -> f32 {
     HANDLE * scale
-}
-
-/// A 1 px `selection` box with its outer edge on the drag rect `l, t, r, b` in sprite px.
-pub fn draw_selection_box(pixmap: &mut Pixmap, l: f32, t: f32, r: f32, b: f32, scale: f32) {
-    let line = stroke(1.0, scale) as f32;
-    let (l, t, r, b) = (l.round(), t.round(), r.round(), b.round());
-    let mut pb = PathBuilder::new();
-    if let Some(outer) = Rect::from_ltrb(l, t, r.max(l + 2.0 * line), b.max(t + 2.0 * line)) {
-        pb.push_rect(outer);
-        if let Some(inner) = Rect::from_ltrb(
-            outer.left() + line,
-            outer.top() + line,
-            outer.right() - line,
-            outer.bottom() - line,
-        ) {
-            pb.push_rect(inner);
-        }
-    }
-    if let Some(path) = pb.finish() {
-        let mut p = paint(SELECTION);
-        p.anti_alias = false;
-        pixmap.fill_path(&path, &p, FillRule::EvenOdd, Transform::identity(), None);
-    }
 }
 
 /// `image` with `objects` drawn into it at 1 : 1: what is copied and saved.
@@ -480,10 +440,9 @@ mod tests {
     }
 
     #[test]
-    fn handles_and_selection_box_match_the_reference() {
+    fn handles_match_the_reference() {
         let mut pixmap = Pixmap::new(120, 60).unwrap();
         pixmap.fill(skia_color(Color::hex(0xF4F4_F4FF)));
-        draw_selection_box(&mut pixmap, 20.0, 15.0, 100.0, 45.0, 1.0);
         draw_handles(
             &mut pixmap,
             &[(20.0, 15.0), (60.0, 15.0), (100.0, 45.0)],
@@ -493,9 +452,9 @@ mod tests {
     }
 
     #[test]
-    fn halo_overlap_is_not_darker() {
-        // An arrow on white: where the shaft runs under the head, the halo is as light as
-        // beside the shaft.
+    fn the_arrow_halo_is_one_layer() {
+        // A white arrow on white: nowhere, the corners included, is darker than one layer of the
+        // dark halo, `#000` at 35%.
         let mut pixmap = Pixmap::new(120, 40).unwrap();
         pixmap.fill(skia_color(Color::hex(0xFFFF_FFFF)));
         let arrow = Object {
@@ -507,17 +466,10 @@ mod tests {
             width: Width::M,
         };
         draw_object(&mut pixmap, &arrow, 1.0, Transform::identity(), false);
-        // The shaft's halo band, 2–3 px from its axis: the halo alone.
-        let beside = pixmap.pixel(40, 17).unwrap();
-        assert!(beside.red() < 200, "{beside:?}");
-        // The same band just before the head's base (x = 88), where the head's halo covers it too.
-        let overlap = pixmap.pixel(86, 17).unwrap();
-        assert!(
-            overlap.red().abs_diff(beside.red()) <= 2,
-            "{overlap:?} vs {beside:?}"
-        );
+        let darkest = pixmap.pixels().iter().map(|c| c.red()).min().unwrap();
+        assert!((164..=168).contains(&darkest), "{darkest}");
         // Inside the head the halo is under the white body.
-        assert_eq!(pixmap.pixel(95, 20).unwrap().red(), 255);
+        assert_eq!(pixmap.pixel(100, 20).unwrap().red(), 255);
     }
 
     #[test]

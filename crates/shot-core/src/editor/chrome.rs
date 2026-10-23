@@ -1,6 +1,6 @@
-//! The editor's chrome (`docs/design/editor.md`, "Toolbar", "Tooltip", "Zoom label", "Notice",
-//! "Unsaved edits"): where each piece lies in the window, and each piece drawn with its shadow
-//! into a sprite of its own, which the editor composes over the image.
+//! The editor's chrome (`docs/design/editor.md`, "Toolbar", "Tooltip", "Zoom label", "Drag-out
+//! button", "Notice", "Unsaved edits"): where each piece lies in the window, and each piece drawn
+//! with its shadow into a sprite of its own, which the editor composes over the image.
 
 use tiny_skia::{FillRule, LineCap, Paint, PathBuilder, Pixmap, Stroke, Transform};
 
@@ -523,6 +523,75 @@ pub fn zoom_label(
     Some(sprite)
 }
 
+const DRAG_TEXT: &str = "Перетащить";
+const DRAG_PAD_LEFT: f32 = 6.0;
+const DRAG_ICON: f32 = 16.0;
+const DRAG_GAP: f32 = 6.0;
+
+/// Where the drag-out button lies: bottom-left, across from the zoom label.
+pub fn drag_out_rect(window: (u32, u32), s: f32) -> Rect {
+    let w = scaled(DRAG_PAD_LEFT, s)
+        + scaled(DRAG_ICON, s)
+        + scaled(DRAG_GAP, s)
+        + text::width(TYPE_LABEL, s, DRAG_TEXT).ceil() as i32
+        + scaled(LABEL_PAD, s);
+    let h = scaled(LABEL_H, s);
+    let inset = scaled(LABEL_INSET, s);
+    Rect::new(inset, window.1 as i32 - inset - h, w, h)
+}
+
+/// The drag-out button: the result as an object to drag where a file goes.
+pub fn drag_out(
+    rect: Rect,
+    s: f32,
+    hover: bool,
+    pressed: bool,
+    palette: &Palette,
+) -> Option<Sprite> {
+    let mut sprite = panel(
+        rect.width,
+        rect.height,
+        RADIUS_SM,
+        SHADOW_SM,
+        palette.surface_base,
+        palette,
+        s,
+    )?;
+    let (ox, oy) = (sprite.inner.x, sprite.inner.y);
+    let fill = if pressed {
+        Some(palette.fill_pressed)
+    } else if hover {
+        Some(palette.fill_hover)
+    } else {
+        None
+    };
+    if let Some(fill) = fill {
+        let a = Area::new(ox as f32, oy as f32, rect.width as f32, rect.height as f32);
+        draw::fill_round_rect(&mut sprite.pixmap, a, RADIUS_SM * s, fill);
+    }
+    let icon = scaled(DRAG_ICON, s);
+    let x = ox + scaled(DRAG_PAD_LEFT, s);
+    icons::draw(
+        &mut sprite.pixmap,
+        Icon::Image,
+        x as f32,
+        (oy + (rect.height - icon) / 2) as f32,
+        icon as f32,
+        s,
+        palette.icon_primary,
+    );
+    label(
+        &mut sprite.pixmap,
+        TYPE_LABEL,
+        s,
+        DRAG_TEXT,
+        (x + icon + scaled(DRAG_GAP, s)) as f32,
+        (oy as f32, rect.height as f32),
+        palette.text_primary,
+    );
+    Some(sprite)
+}
+
 /// A notice: its sprite and where its top-left corner goes, centered above the bottom edge.
 pub fn notice(
     icon: Icon,
@@ -812,6 +881,8 @@ mod tests {
             assert!(tip.pixmap.width() > 0);
             let r = zoom_label_rect((1440, 900), s, 100);
             assert!(zoom_label(r, s, 100, true, palette).is_some());
+            let r = drag_out_rect((1440, 900), s);
+            assert!(drag_out(r, s, true, false, palette).is_some());
             assert!(
                 notice(
                     Icon::Check,
@@ -839,5 +910,16 @@ mod tests {
         assert_eq!(save.right(), d.rect.right() - 24);
         assert_eq!(cancel.right() + 8, save.x);
         assert_eq!(d.hit(save.x + 2, save.y + 2), Some(DialogButton::Save));
+    }
+
+    #[test]
+    fn drag_out_sits_across_from_the_zoom_label() {
+        for s in [1.0, 1.25, 2.0] {
+            let window = (1200, 800);
+            let drag = drag_out_rect(window, s);
+            let zoom = zoom_label_rect(window, s, 100);
+            assert_eq!(drag.x, window.0 as i32 - zoom.right());
+            assert_eq!((drag.y, drag.height), (zoom.y, zoom.height));
+        }
     }
 }

@@ -8,6 +8,7 @@ mod autostart;
 mod capture;
 mod clipboard;
 mod dev;
+mod drag;
 mod editor;
 mod folder;
 mod form;

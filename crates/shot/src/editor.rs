@@ -7,9 +7,9 @@ use std::io::{self, BufReader, Cursor};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::thread::{self, JoinHandle};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
-use shot_core::draw::{IntSize, Pixmap};
+use shot_core::draw::{IntSize, Pixmap, thumbnail};
 use shot_core::editor::{EDGE, Editor, Input, Open, Request, view};
 use shot_core::geom::{Point, Rect};
 use shot_core::image::{BgrxView, Decoded, decode_png};
@@ -22,6 +22,11 @@ use shot_platform::sys::{
 
 use crate::app::{BASE_DPI, OS, ms};
 use crate::log::log;
+
+/// The longest side of what a drag out of the window shows, logical px.
+const DRAG_IMAGE: f32 = 192.0;
+/// How long a copy written for a drag is kept: the app it was dropped into may read it late.
+const DRAG_KEEP: Duration = Duration::from_secs(24 * 60 * 60);
 
 /// A capture to open.
 pub enum Source {
@@ -208,6 +213,12 @@ impl EditorHandler for Session {
             }
             WindowEvent::Timer => self.editor.tick(now),
             WindowEvent::Notify => self.take_save(now),
+            WindowEvent::DragEnded(result) => {
+                if let Err(e) = result {
+                    log!("editor: drag failed: {e}");
+                }
+                self.editor.handle(Input::DragEnded, now);
+            }
         }
         for request in self.editor.take_requests() {
             self.run(window, request, now);
@@ -281,7 +292,44 @@ impl Session {
                 window.close();
             }
             Request::Close => window.close(),
+            Request::DragFile => self.drag(window, now),
         }
+    }
+
+    /// Drags the result out of the window as a file: the capture's own file when it has all the
+    /// edits, or else a copy written for the drag. Dragging saves nothing.
+    fn drag(&mut self, window: &EditorWindow, now: Instant) {
+        let t0 = Instant::now();
+        let result = self.editor.result();
+        let path = match &self.file {
+            Some(file) if !self.editor.dirty() && file.exists() => file.clone(),
+            file => {
+                let name = file
+                    .as_ref()
+                    .and_then(|f| f.file_name())
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| capture_file_name(self.time, None));
+                match write_for_drag(&result, &name, self.dpi) {
+                    Ok(path) => path,
+                    Err(e) => {
+                        log!("editor: nothing to drag: {e}");
+                        self.editor.handle(Input::DragEnded, now);
+                        self.editor.failed(failure_reason(&e), now);
+                        return;
+                    }
+                }
+            }
+        };
+        let view = view_of(&result);
+        let k = (DRAG_IMAGE * window.scale() / view.width.max(view.height) as f32).min(1.0);
+        let size = |side: u32| ((side as f32 * k).round() as u32).max(1);
+        let image = thumbnail(&view, size(view.width), size(view.height));
+        window.drag_file(&path, image.as_ref().map(view_of));
+        log!(
+            "editor: drag of {} ready in {:.1} ms",
+            path.display(),
+            ms(t0.elapsed())
+        );
     }
 
     /// Puts `image` on the clipboard; false when that failed.
@@ -405,6 +453,23 @@ fn save(
         ms(t0.elapsed())
     );
     Ok(new.then_some(path))
+}
+
+/// Writes `image` for a drag out of the window as `name` in the system's temporary folder,
+/// dropping the copies of earlier drags that are past keeping; returns the file.
+fn write_for_drag(image: &Pixmap, name: &str, dpi: f32) -> io::Result<PathBuf> {
+    let dir = std::env::temp_dir().join("Shot");
+    std::fs::create_dir_all(&dir)?;
+    for entry in std::fs::read_dir(&dir)?.flatten() {
+        let old = (entry.metadata().and_then(|m| m.modified()))
+            .is_ok_and(|t| t.elapsed().is_ok_and(|age| age > DRAG_KEEP));
+        if old {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
+    let path = dir.join(name);
+    replace_png(&path, view_of(image), dpi)?;
+    Ok(path)
 }
 
 /// A result of the editor as the clipboard and PNG take it: opaque BGRA rows.

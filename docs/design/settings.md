@@ -109,7 +109,7 @@ In text, a hotkey is written with `+` on Windows and as joined symbols on macOS.
 
 An ordinary OS window with the system frame, not resizable, titled `Настройки Shot`. One instance:
 opening it again brings it to the front. It opens centered on the monitor with the cursor.
-Content 560 wide, its height follows the rows (473 with no error line). Background
+Content 560 wide, its height follows the rows (530 with no error line). Background
 `surface.base`. Every change applies and is saved at once; there is no Save button. `Esc` closes
 the window unless a hotkey is being recorded.
 
@@ -117,7 +117,7 @@ Layout, top to bottom, padding 24:
 
 1. Header, 40 high: the app icon at 40, 12, then `Shot` in `type.headline` over `Версия 1.0.0` in
    `type.caption` `text.secondary`.
-2. 16, then six rows. Each row has a 1 px `border.default` divider above it and is 56 high: on
+2. 16, then seven rows. Each row has a 1 px `border.default` divider above it and is 56 high: on
    the left the label in `type.body-strong` `text.primary`, 2, the hint in `type.caption`
    `text.secondary`; on the right the controls, right-aligned, 12 apart, vertically centered. An
    error or hint line adds 24 to its row.
@@ -129,12 +129,14 @@ Layout, top to bottom, padding 24:
 | После снимка | Куда отправить снимок | Segmented: Буфер · Файл · Буфер и файл | Буфер и файл |
 | Папка | The folder path, `type.caption`, elided in the middle to fit | Secondary button `Изменить…` | `%USERPROFILE%\Pictures\Shot` / `~/Pictures/Shot` |
 | Превью | Карточка в углу после снимка | Segmented: 3 с · 5 с · 10 с, then a toggle | On, 5 с |
+| Угол превью | Нижний угол экрана | Segmented: Слева · Справа | Слева |
 | Автозапуск | Запускать Shot при входе в систему | Toggle | Set in the first-run window |
 | Тема | Светлая или тёмная | Segmented: Как в системе · Светлая · Тёмная | Как в системе |
 
 - `Изменить…` opens the native folder dialog: `IFileOpenDialog` with `FOS_PICKFOLDERS` on
   Windows, `NSOpenPanel` with `canChooseDirectories` on macOS. Title `Папка для снимков`.
-- The preview duration is disabled while the preview toggle is off.
+- The preview duration is disabled while the preview toggle is off. The corner stays enabled:
+  a failed save shows its card even with the preview off.
 - The folder stays enabled with `Буфер`: the editor's `Ctrl+S` still saves there.
 - Tab order follows the rows top to bottom, left to right.
 

@@ -5,14 +5,18 @@
 //! delegate tells of resizes, the close button and the lost focus; both become [`WindowEvent`]s
 //! for the [`EditorHandler`] that owns the editor. An event that arrives while the handler runs
 //! waits until it returns. The handler is dropped with the window.
+//!
+//! While a file is dragged out ([`EditorWindow::drag_file`]), the mouse goes to AppKit, which
+//! runs the drag.
 
 use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use objc2::rc::Retained;
-use objc2::{ClassType, MainThreadMarker, msg_send, sel};
+use objc2::{ClassType, MainThreadMarker, Message, msg_send, sel};
 use objc2_app_kit::{
     NSAppearanceCustomization, NSCursor, NSEvent, NSEventModifierFlags, NSEventType, NSWindow,
     NSWindowStyleMask,
@@ -21,9 +25,10 @@ use objc2_foundation::{NSSize, NSString};
 use shot_core::editor::objects::Axis;
 use shot_core::editor::{Cursor, Input, Key};
 use shot_core::geom::{Point, Rect};
-use shot_core::image::BgrxMut;
+use shot_core::image::{BgrxMut, BgrxView};
 
 use super::Error;
+use super::drag::{self, DragImage};
 use super::monitors::screens;
 use super::pump::{Intercepted, register, set_timer, unregister};
 use super::titled::{self, Note, Parts, Surface, appearance};
@@ -49,6 +54,9 @@ pub enum WindowEvent {
     Timer,
     /// [`EditorNotifier::notify`] was called.
     Notify,
+    /// The drag of [`EditorWindow::drag_file`] is over, or did not start: tell the editor
+    /// [`Input::DragEnded`].
+    DragEnded(Result<(), Error>),
 }
 
 /// Owns the editor; gets every event of its window. After [`Input::Resize`] — also the first
@@ -85,6 +93,12 @@ struct Flags {
     dark: Cell<bool>,
     follow_system: Cell<bool>,
     closing: Cell<bool>,
+    /// The file to drag once the handler returns, and what the drag shows.
+    drag: RefCell<Option<(PathBuf, Option<DragImage>)>>,
+    /// The last press or drag of the mouse: a drag starts from it.
+    mouse: RefCell<Option<Retained<NSEvent>>>,
+    /// AppKit runs a drag out of the window.
+    dragging: Cell<bool>,
 }
 
 /// The window as its handler sees it.
@@ -216,6 +230,9 @@ impl EditorWindow {
             dark: Cell::new(dark),
             follow_system: Cell::new(follow_system),
             closing: Cell::new(false),
+            drag: RefCell::new(None),
+            mouse: RefCell::new(None),
+            dragging: Cell::new(false),
         });
         let window = EditorWindow {
             ns: ns.clone(),
@@ -280,6 +297,14 @@ impl EditorWindow {
     /// Closes the window once the handler returns; the handler is dropped with it.
     pub fn close(&self) {
         self.flags.closing.set(true);
+    }
+
+    /// Drags the file at `path` out of the window once the handler returns, as Finder does, with
+    /// `image` under the cursor; ask while the left button is down. The handler gets
+    /// [`WindowEvent::DragEnded`] when the drag is over; meanwhile its other events come as usual.
+    pub fn drag_file(&self, path: &Path, image: Option<BgrxView>) {
+        let image = image.and_then(|i| DragImage::new(i, self.scale()));
+        *self.flags.drag.borrow_mut() = Some((path.to_path_buf(), image));
     }
 }
 
@@ -392,6 +417,59 @@ fn dispatch(id: isize, event: WindowEvent) {
     if flags.resize.take() {
         resized(id);
     }
+    let drag = flags.drag.borrow_mut().take();
+    if let Some((path, image)) = drag {
+        start_drag(id, &flags, &path, image.as_ref());
+    }
+}
+
+/// Starts the drag the handler asked for; it ends in [`drag_ended`].
+fn start_drag(id: isize, flags: &Flags, path: &Path, image: Option<&DragImage>) {
+    let view = EDITORS.with_borrow(|list| {
+        let e = list.iter().find(|e| e.parts.id == id)?;
+        Some(e.parts.view.clone())
+    });
+    let event = flags.mouse.borrow().clone();
+    let (Some(view), Some(event)) = (view, event) else {
+        return dispatch(
+            id,
+            WindowEvent::DragEnded(Err(Error::new("no press to drag from"))),
+        );
+    };
+    flags.dragging.set(true);
+    if let Err(e) = drag::drag_file(id, &view, &event, path, image) {
+        drag::abandon(id);
+        drag_ended(id, Err(e));
+    }
+}
+
+/// Window `id`'s drag is over: its handler is told, then where the pointer is now, which the
+/// drag kept from it.
+pub(super) fn drag_ended(id: isize, result: Result<(), Error>) {
+    let Some((ns, view, flags)) = EDITORS.with_borrow(|list| {
+        let e = list.iter().find(|e| e.parts.id == id)?;
+        Some((e.parts.ns.clone(), e.parts.view.clone(), e.flags.clone()))
+    }) else {
+        return;
+    };
+    flags.dragging.set(false);
+    dispatch(id, WindowEvent::DragEnded(result));
+    let p = view.convertPoint_fromView(ns.mouseLocationOutsideOfEventStream(), None);
+    let bounds = view.bounds();
+    let inside =
+        (0.0..bounds.size.width).contains(&p.x) && (0.0..bounds.size.height).contains(&p.y);
+    flags.inside.set(inside);
+    let input = if inside {
+        let scale = f64::from(flags.told.get().2);
+        Input::Move {
+            x: (p.x * scale) as f32,
+            y: ((bounds.size.height - p.y) * scale) as f32,
+            shift: false,
+        }
+    } else {
+        Input::Leave
+    };
+    dispatch(id, WindowEvent::Input(input));
 }
 
 /// The content may have a new size or scale: a new back buffer, and the handler is told.
@@ -430,6 +508,25 @@ pub(crate) fn intercept(event: &NSEvent) -> Intercepted {
     }) else {
         return Intercepted::Pass;
     };
+    let kind = event.r#type();
+    if flags.dragging.get() {
+        match kind {
+            NSEventType::MouseMoved | NSEventType::LeftMouseDragged | NSEventType::LeftMouseUp => {
+                return Intercepted::Pass;
+            }
+            // A press while the drag still runs: AppKit never said it ended.
+            NSEventType::LeftMouseDown if drag::abandon(id) => {
+                drag_ended(id, Err(Error::new("the drag did not end")));
+            }
+            _ => {}
+        }
+    }
+    if matches!(
+        kind,
+        NSEventType::LeftMouseDown | NSEventType::LeftMouseDragged
+    ) {
+        flags.mouse.replace(Some(event.retain()));
+    }
     let mods = event.modifierFlags();
     let shift = mods.contains(NSEventModifierFlags::Shift);
     let cmd = mods.contains(NSEventModifierFlags::Command);

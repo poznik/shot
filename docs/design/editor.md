@@ -38,6 +38,20 @@ Bottom-right, 12 from the content's right and bottom edges. Height 24, padding 8
 percent, `type.label`, `text.secondary`, tabular digits. Hover adds `fill.hover`. Click switches
 between fit and 100%.
 
+### Drag-out button
+
+Bottom-left, across from the zoom label: 12 from the content's left and bottom edges, the label's
+height 24, `radius.sm`, `surface.base`, 1 px `border.default` inside, `shadow.sm`. Padding 6 left,
+8 right; the `image` icon at 16 in `icon.primary`, 6 gap, «Перетащить» in `type.label`,
+`text.primary`. Hover adds `fill.hover`, a press `fill.pressed`.
+
+Dragging it is dragging a file out of Explorer / Finder: the drag starts once the pointer moves
+3 px from the press and shows a thumbnail of the result, at most 192 on its longer side, above
+the cursor. A drop on a folder or the desktop copies the file there; a drop on a chat sends it.
+The file is the capture's own file when it has every edit, or else the result written to
+`<temp>/Shot/<name>.png` (copies older than a day are dropped there on the next drag). The
+drag is a copy, never a move, and it saves nothing. A click without a drag shows its notice.
+
 ## Toolbar
 
 Floating, centered horizontally, 12 below the content top. 888 × 44, `surface.base`, `radius.md`,
@@ -97,10 +111,12 @@ Names: Выделение, Стрелка, Линия, Прямоугольни�
 | Halo, each side | 1 | 1 | 1 |
 
 - **Line**: from press to release, round caps.
-- **Arrow**: the shaft is a line from the tail with a round cap, ending 2 px inside the head. The
-  head is a triangle: tip at the end point, length `L = 3w + 10` along the shaft, width `L` across
-  it (half-width `L/2`). It is filled and stroked with `w/2` and round joins, which rounds its
-  corners.
+- **Arrow**: one filled shape, a polygon grown by `w/4`: round at its convex corners, sharp at
+  the two concave ones. The polygon runs from the tail (a point) to the neck, `0.68 L` back from
+  the tip, where it is `w` wide, so the painted shaft widens from `w/2` at the tail to `1.5w`. At
+  the neck the head's back edges sweep out and back to the barbs, `L = 3w + 10` back from the tip
+  and `L/2` from the axis; from the barbs its sides run to the tip at the end point. A head longer
+  than the arrow shrinks to it.
 - **Rectangle**: the drag rect, stroke centered on its edge, round joins, no fill.
 - **Ellipse**: inscribed in the drag rect, stroke centered on its edge, no fill.
 - **Counter**: centered on the click. A filled circle of diameter `d` in the annotation color,
@@ -113,7 +129,8 @@ Names: Выделение, Стрелка, Линия, Прямоугольни�
   ellipse a circle.
 - **Halo**: every object's halo is the same geometry stroked 2 px wider (filled parts stay
   filled). Draw all halo parts of one object opaque into a separate layer, then blend that layer
-  at the halo alpha, so overlapping parts (shaft under head) do not get darker.
+  at the halo alpha, so overlapping parts do not get darker. The arrow's halo is its polygon
+  grown by `w/4 + 1`.
 
 ## Hover and selection
 
@@ -123,15 +140,16 @@ Colors are the theme-independent `selection` and `selection.handle-fill` from
 - **Hover** (select tool): the object's halo is replaced by a 1 px `selection` outline (the same
   halo geometry, opaque).
 - **Selected line or arrow**: the outline plus two handles at the end points.
-- **Selected rectangle or ellipse**: the halo stays; a 1 px `selection` box on the drag rect and
-  8 handles at its corners and edge midpoints.
+- **Selected rectangle or ellipse**: the halo stays, plus 8 handles at the drag rect's corners
+  and edge midpoints. No box: on a rectangle it would run inside the stroke.
 - **Selected counter**: the outline only; its size comes from the width.
 - **Handle**: a circle of diameter 10, `selection.handle-fill` with a 2 px `selection` ring
   inside its edge. Hit area 20 × 20. Handles keep their size at any zoom.
 - A drawing tool always draws; the new object is selected at once. The selected object's handles
   work under any tool. To select another object, use the select tool.
 - Cursors: crosshair while drawing; move over an object with the select tool; a resize cursor in
-  the handle's direction over a handle; hand while panning.
+  the handle's direction over a handle; hand while panning. Over the drag-out button, an open hand;
+  a closed one while it is pressed or dragged.
 
 ## Keys
 
@@ -162,6 +180,7 @@ the 120 ms fade.
 | `Ctrl+C` | `check`, `success` | Скопировано | `text.primary` |
 | `Ctrl+S` | `check`, `success` | Сохранено и скопировано | `text.primary` |
 | Save failed | `alert`, `danger` | Не сохранено: нет доступа к папке | `danger` |
+| A click on the drag-out button | `image`, `icon.secondary` | Перетащите в папку или чат | `text.primary` |
 
 ## Unsaved edits
 

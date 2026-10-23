@@ -1,28 +1,31 @@
-//! The animation for the README: a capture on a made-up desktop, every Shot pixel drawn by this
-//! crate's own code — the overlay, the preview card and the editor.
+//! The animation and the stills for the README: a capture on a made-up desktop, every Shot pixel
+//! drawn by this crate's own code — the overlay, the preview card, the editor and the settings.
 //!
 //! `cargo run -p shot-core --release --example demo [folder]`
 //!
 //! Writes `frame-NNN.png` and `frames.txt` (one `file duration_ms scene` per line) into `folder`,
 //! `target/demo` by default, for a GIF encoder to put together; frames of one scene can share a
-//! palette.
+//! palette. The stills go to `folder/stills`: `overlay.png`, `preview.png` and `editor.png` cut
+//! from frames of the animation, and `settings-light.png` and `settings-dark.png` at scale 2.
 
 use std::fmt::Write as _;
 use std::fs::{self, File};
 use std::io::BufWriter;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use shot_core::draw::{self, Area};
 use shot_core::editor::{Editor, Input, Key, Open};
 use shot_core::geom::{Point, Rect};
-use shot_core::hotkey::Os;
+use shot_core::hotkey::{Hotkey, Os};
 use shot_core::image::{BgrxMut, BgrxView, Compression, encode_png};
 use shot_core::overlay::{Event, Monitor, Outcome, Overlay, Selection};
-use shot_core::preview::{Card, Status};
-use shot_core::settings::Destination;
+use shot_core::preview::{Card, Side, Status};
+use shot_core::settings::{Destination, ThemeChoice};
 use shot_core::text::{self, TypeStyle, Weight};
 use shot_core::theme::{self, Color, Palette};
+use shot_core::ui::SettingsWindow;
+use shot_core::ui::settings::Values;
 use tiny_skia::{FillRule, IntSize, Paint, PathBuilder, Pixmap, PixmapPaint, Stroke, Transform};
 
 const W: u32 = 1024;
@@ -404,6 +407,61 @@ impl Film {
         encode_png(view, out, Compression::Fast, None).expect("write PNG");
         writeln!(self.list, "{name} {ms} {}", self.scene).unwrap();
     }
+
+    /// The part `r` of a frame the size of the desktop, as `stills/<name>.png`.
+    fn still(&self, name: &str, data: &[u8], r: Rect) {
+        let stride = W as usize * 4;
+        let view = BgrxView {
+            width: r.width as u32,
+            height: r.height as u32,
+            stride,
+            data: &data[r.y as usize * stride + r.x as usize * 4..],
+        };
+        save(
+            &self.dir.join("stills").join(format!("{name}.png")),
+            view,
+            1.0,
+        );
+    }
+}
+
+fn save(path: &Path, view: BgrxView, scale: f32) {
+    let out = BufWriter::new(File::create(path).expect("create PNG"));
+    encode_png(view, out, Compression::Fast, Some(96.0 * scale)).expect("write PNG");
+}
+
+/// The settings window at scale 2, with the preview in the right corner as in the animation.
+fn settings(dir: &Path, dark: bool) {
+    let values = Values {
+        hotkey: Hotkey::default_for(Os::Windows),
+        hotkey_works: true,
+        destination: Destination::Both,
+        folder: r"C:\Users\Someone\Pictures\Shot".to_string(),
+        preview: true,
+        preview_seconds: 5,
+        preview_side: Side::Right,
+        autostart: true,
+        theme: ThemeChoice::System,
+    };
+    let version = env!("CARGO_PKG_VERSION");
+    let mut w = SettingsWindow::new(values, version, Os::Windows, 2.0, dark);
+    let (width, height) = w.content_size();
+    let mut data = vec![0; width as usize * height as usize * 4];
+    let stride = width as usize * 4;
+    w.draw(&mut BgrxMut {
+        width,
+        height,
+        stride,
+        data: &mut data,
+    });
+    let theme = if dark { "dark" } else { "light" };
+    let view = BgrxView {
+        width,
+        height,
+        stride,
+        data: &data,
+    };
+    save(&dir.join(format!("settings-{theme}.png")), view, 2.0);
 }
 
 /// The capture of `r` from the desktop, as the editor gets it.
@@ -486,7 +544,7 @@ impl EditorShot {
 fn main() {
     let dir = PathBuf::from(std::env::args().nth(1).unwrap_or("target/demo".into()));
     let _ = fs::remove_dir_all(&dir);
-    fs::create_dir_all(&dir).expect("create the folder");
+    fs::create_dir_all(dir.join("stills")).expect("create the folder");
     let mut film = Film {
         dir: dir.clone(),
         list: String::new(),
@@ -551,6 +609,7 @@ fn main() {
         overlay.handle(Event::Move(at(c)));
         shoot(&mut overlay, &mut film, if i == 15 { 600 } else { STEP });
     }
+    film.still("overlay", &canvas, full);
     let capture = match overlay.handle(Event::Release(at(to))).outcome {
         Some(Outcome::Capture(target)) => target.rect,
         other => panic!("the drag captured {other:?}"),
@@ -601,6 +660,10 @@ fn main() {
         let mut p = with_card(inside);
         pointer(&mut p, c);
         film.frame(p.data(), if i == 11 { 900 } else { STEP });
+        if i == 11 {
+            let corner = Rect::new(W as i32 - 512, H as i32 - 320, 512, 320);
+            film.still("preview", p.data(), corner);
+        }
     }
 
     // A click opens the editor; mark the chart up.
@@ -726,7 +789,19 @@ fn main() {
         });
         film.frame(ed.compose(&desk, m, false).data(), STEP);
     }
-    film.frame(ed.compose(&desk, rest, false).data(), 2600);
+    let last = ed.compose(&desk, rest, false);
+    film.frame(last.data(), 2600);
+    let margin = 24;
+    let window = Rect::new(
+        ed.at.0 as i32 - margin,
+        ed.at.1 as i32 - margin,
+        ed.size.0 as i32 + 2 * margin,
+        ed.size.1 as i32 + TITLE_BAR as i32 + 2 * margin,
+    );
+    film.still("editor", last.data(), window);
+    for dark in [false, true] {
+        settings(&dir.join("stills"), dark);
+    }
 
     fs::write(dir.join("frames.txt"), &film.list).expect("write frames.txt");
     println!("{} frames in {}", film.list.lines().count(), dir.display());

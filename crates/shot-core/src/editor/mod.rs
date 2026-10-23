@@ -1,7 +1,7 @@
 //! The editor (`docs/design/editor.md`, SPEC §3.3): annotations over a capture, drawn here and
 //! shown by the platform in an ordinary window. The platform passes in input, the clock and the
 //! window's size; it gets back the parts of the window to redraw, the cursor, and what to do:
-//! copy, save, close.
+//! copy, save, drag the result out as a file, close.
 
 mod backdrop;
 pub mod chrome;
@@ -128,6 +128,8 @@ pub enum Input {
     Close,
     /// The window lost the keyboard focus or the mouse capture.
     Blur,
+    /// The drag that [`Request::DragFile`] started is over, dropped or not.
+    DragEnded,
 }
 
 /// Keys by their place on a US keyboard, whatever the layout: letters lowercase.
@@ -158,6 +160,10 @@ pub enum Request {
     SaveAndClose { file: bool, copy: bool },
     /// Close the window, dropping the edits.
     Close,
+    /// Drag the result out of the window as a file, as from a file manager, while the mouse button
+    /// is still down; send [`Input::DragEnded`] when the drag is over. A drag that does not start
+    /// ends with the button's release, as any press.
+    DragFile,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -176,6 +182,8 @@ pub enum Notice {
     Saved,
     /// Not saved, and why: `нет доступа к папке`.
     Failed(&'static str),
+    /// The drag-out button was clicked, not dragged.
+    DragHint,
 }
 
 /// The objects and the selection: what undo goes back to.
@@ -215,6 +223,11 @@ enum Drag {
     Button(Button),
     ZoomLabel,
     Dialog(DialogButton),
+    /// The drag-out button, pressed at `from`; `started` once it asked for the file's drag.
+    Out {
+        from: (f32, f32),
+        started: bool,
+    },
 }
 
 /// What lies under the cursor.
@@ -224,6 +237,7 @@ enum Target {
     /// The toolbar: a control or its background.
     Toolbar(Option<Button>),
     ZoomLabel,
+    DragOut,
     Handle(Handle),
     Object(usize),
     Canvas,
@@ -291,9 +305,6 @@ struct DialogState {
     hover: Option<DialogButton>,
 }
 
-/// The selected object's handles, and the box of a rect or an ellipse: left, top, right, bottom.
-type Decorations = (Vec<(f32, f32)>, Option<[f32; 4]>);
-
 /// A part of the window and what it shows: when either changes, the part is redrawn.
 #[derive(Clone, Copy, PartialEq)]
 struct Visual {
@@ -332,6 +343,7 @@ pub struct Editor {
     space: bool,
     hover_button: Option<Button>,
     zoom_hover: bool,
+    drag_hover: bool,
     /// The control under the cursor, since when, and whether a press hid its tooltip.
     tip: Option<(Button, Instant, bool)>,
     notice: Option<NoticeState>,
@@ -344,6 +356,7 @@ pub struct Editor {
     toolbar_sprite: Option<Placed>,
     tooltip_sprite: Option<Placed>,
     zoom_sprite: Option<Placed>,
+    drag_sprite: Option<Placed>,
     notice_sprite: Option<Placed>,
     notice_alpha: u8,
     dialog_sprite: Option<Placed>,
@@ -381,6 +394,7 @@ impl Editor {
             space: false,
             hover_button: None,
             zoom_hover: false,
+            drag_hover: false,
             tip: None,
             notice: None,
             dialog: None,
@@ -391,6 +405,7 @@ impl Editor {
             toolbar_sprite: None,
             tooltip_sprite: None,
             zoom_sprite: None,
+            drag_sprite: None,
             notice_sprite: None,
             notice_alpha: 0,
             dialog_sprite: None,
@@ -541,6 +556,7 @@ impl Editor {
                     self.pointer = None;
                     self.hover_button = None;
                     self.zoom_hover = false;
+                    self.drag_hover = false;
                     self.hovered = None;
                     self.tip = None;
                 }
@@ -590,10 +606,19 @@ impl Editor {
             }
             Input::Blur => {
                 self.space = false;
-                if let Some((x, y)) = self.pointer
+                if matches!(self.drag, Drag::Out { .. }) {
+                    // Lost, not released: no hint. A file drag in progress ends with DragEnded.
+                    self.drag = Drag::None;
+                } else if let Some((x, y)) = self.pointer
                     && !matches!(self.drag, Drag::None)
                 {
                     self.on_up(x, y, now);
+                }
+            }
+            Input::DragEnded => {
+                if matches!(self.drag, Drag::Out { .. }) {
+                    self.drag = Drag::None;
+                    self.follow_pointer(now);
                 }
             }
         }
@@ -647,6 +672,9 @@ impl Editor {
         if chrome::zoom_label_rect(self.window(), s, self.zoom_percent()).contains(xi, yi) {
             return Target::ZoomLabel;
         }
+        if chrome::drag_out_rect(self.window(), s).contains(xi, yi) {
+            return Target::DragOut;
+        }
         if let Some(i) = self.selected {
             let reach = render::handle_reach(s);
             let nearest = self.objects[i]
@@ -671,6 +699,15 @@ impl Editor {
             {
                 return Target::Object(i);
             }
+            // Inside a rectangle or an ellipse: what lies in it is hit first, by the pass above,
+            // and of nested shapes the smallest wins.
+            if let Some((i, _)) = (0..self.objects.len())
+                .rev()
+                .filter_map(|i| Some((i, self.objects[i].encloses(p)?)))
+                .min_by(|a, b| a.1.total_cmp(&b.1))
+            {
+                return Target::Object(i);
+            }
         }
         Target::Canvas
     }
@@ -682,6 +719,7 @@ impl Editor {
             _ => None,
         };
         self.zoom_hover = target == Target::ZoomLabel;
+        self.drag_hover = target == Target::DragOut;
         if let Some(d) = &mut self.dialog {
             d.hover = match target {
                 Target::Dialog(b) => b,
@@ -751,7 +789,24 @@ impl Editor {
                 o.drag_handle(&original, handle, to);
                 self.objects[index] = o;
             }
-            Drag::None | Drag::Button(_) | Drag::ZoomLabel | Drag::Dialog(_) => {}
+            Drag::Out {
+                from,
+                started: false,
+            } => {
+                let reach = MIN_DRAG * self.scale();
+                if (x - from.0).abs().max((y - from.1).abs()) >= reach {
+                    self.drag = Drag::Out {
+                        from,
+                        started: true,
+                    };
+                    self.requests.push(Request::DragFile);
+                }
+            }
+            Drag::None
+            | Drag::Button(_)
+            | Drag::ZoomLabel
+            | Drag::Dialog(_)
+            | Drag::Out { started: true, .. } => {}
         }
     }
 
@@ -769,6 +824,10 @@ impl Editor {
             Target::Toolbar(Some(b)) if self.enabled(b) => Drag::Button(b),
             Target::Toolbar(Some(_)) => Drag::None,
             Target::ZoomLabel => Drag::ZoomLabel,
+            Target::DragOut => Drag::Out {
+                from: (x, y),
+                started: false,
+            },
             _ if self.space => Drag::Pan { last: (x, y) },
             Target::Handle(handle) => match self.selected {
                 Some(index) => Drag::Handle {
@@ -892,7 +951,12 @@ impl Editor {
                     self.choose(b);
                 }
             }
-            Drag::Pan { .. } | Drag::None => {}
+            Drag::Out { started: false, .. } => {
+                if target == Target::DragOut {
+                    self.show(Notice::DragHint, now);
+                }
+            }
+            Drag::Out { started: true, .. } | Drag::Pan { .. } | Drag::None => {}
         }
         self.on_move(x, y, now);
     }
@@ -1100,6 +1164,7 @@ impl Editor {
                 return Cursor::Resize(self.objects[*index].handle_axis(*handle));
             }
             Drag::Button(_) | Drag::ZoomLabel | Drag::Dialog(_) => return Cursor::Arrow,
+            Drag::Out { .. } => return Cursor::Grabbing,
             Drag::None => {}
         }
         let Some((x, y)) = self.pointer else {
@@ -1107,6 +1172,7 @@ impl Editor {
         };
         match self.target(x, y) {
             Target::Dialog(_) | Target::Toolbar(_) | Target::ZoomLabel => Cursor::Arrow,
+            Target::DragOut => Cursor::Grab,
             _ if self.space => Cursor::Grab,
             Target::Handle(h) => match self.selected {
                 Some(i) => Cursor::Resize(self.objects[i].handle_axis(h)),
@@ -1127,27 +1193,19 @@ impl Editor {
         self.hovered == Some(i) || (self.selected == Some(i) && !boxed)
     }
 
-    /// The selected object's handles and box, window px.
-    fn decorations(&self) -> Option<Decorations> {
+    /// The selected object's handles, window px.
+    fn decorations(&self) -> Option<Vec<(f32, f32)>> {
         let o = &self.objects[self.selected?];
-        let handles = o
-            .handles()
-            .into_iter()
-            .map(|(_, p)| self.view.to_window(p))
-            .collect();
-        let frame = match o.shape {
-            Shape::Rect { a, b } | Shape::Ellipse { a, b } => {
-                let (l, t) = self.view.to_window(Pt::new(a.x.min(b.x), a.y.min(b.y)));
-                let (r, bb) = self.view.to_window(Pt::new(a.x.max(b.x), a.y.max(b.y)));
-                Some([l, t, r, bb])
-            }
-            _ => None,
-        };
-        Some((handles, frame))
+        Some(
+            o.handles()
+                .into_iter()
+                .map(|(_, p)| self.view.to_window(p))
+                .collect(),
+        )
     }
 
     fn decorations_visual(&self) -> Option<Visual> {
-        let (handles, frame) = self.decorations()?;
+        let handles = self.decorations()?;
         let reach = render::handle_reach(self.scale()) / 2.0 + 2.0;
         let mut h = DefaultHasher::new();
         let mut bounds: Option<Rect> = None;
@@ -1163,10 +1221,6 @@ impl Editor {
         for &(x, y) in &handles {
             (x.to_bits(), y.to_bits()).hash(&mut h);
             add(x - reach, y - reach, x + reach, y + reach);
-        }
-        if let Some([l, t, r, b]) = frame {
-            [l, t, r, b].map(f32::to_bits).hash(&mut h);
-            add(l - 2.0, t - 2.0, r + 2.0, b + 2.0);
         }
         Some(Visual {
             id: 1,
@@ -1246,6 +1300,18 @@ impl Editor {
             },
         );
 
+        let drag_hover = self.drag_hover;
+        let drag_pressed = matches!(self.drag, Drag::Out { .. });
+        keep(
+            &mut self.drag_sprite,
+            Some(hash((common, drag_hover, drag_pressed))),
+            || {
+                let r = chrome::drag_out_rect(window, s);
+                chrome::drag_out(r, s, drag_hover, drag_pressed, palette)
+                    .map(|sprite| (sprite, Point::new(r.x, r.y)))
+            },
+        );
+
         let notice = self.notice.as_ref().map(|n| n.notice);
         keep(
             &mut self.notice_sprite,
@@ -1269,6 +1335,12 @@ impl Editor {
                         palette.danger,
                         format!("Не сохранено: {reason}"),
                         palette.danger,
+                    ),
+                    Notice::DragHint => (
+                        Icon::Image,
+                        palette.icon_secondary,
+                        "Перетащите в папку или чат".to_string(),
+                        palette.text_primary,
                     ),
                 };
                 chrome::notice(icon, icon_color, &text, color, window, s, palette)
@@ -1334,6 +1406,7 @@ impl Editor {
         for (id, slot) in [
             (2, &self.toolbar_sprite),
             (3, &self.zoom_sprite),
+            (7, &self.drag_sprite),
             (4, &self.tooltip_sprite),
         ] {
             if let Some(p) = slot {
@@ -1395,12 +1468,9 @@ impl Editor {
                 backdrop.draw_surround(&mut dst, region, piece, shown, self.palette);
             }
         }
-        if let Some((handles, frame)) = self.decorations() {
+        if let Some(handles) = self.decorations() {
             let s = self.scale();
             let (dx, dy) = (region.x as f32, region.y as f32);
-            if let Some([l, t, r, b]) = frame {
-                render::draw_selection_box(out, l - dx, t - dy, r - dx, b - dy, s);
-            }
             let points: Vec<(f32, f32)> = handles.iter().map(|&(x, y)| (x - dx, y - dy)).collect();
             render::draw_handles(out, &points, s);
         }
@@ -1408,6 +1478,7 @@ impl Editor {
         for p in [
             &self.toolbar_sprite,
             &self.zoom_sprite,
+            &self.drag_sprite,
             &self.tooltip_sprite,
         ]
         .into_iter()

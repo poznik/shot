@@ -132,15 +132,16 @@ const fn swatch(rgba: u32, glyph: Color, halo: Color) -> Swatch {
     }
 }
 
-/// `selection`: the hover outline, the selection box and the handle ring.
+/// `selection`: the hover outline and the handle ring.
 pub const SELECTION: Color = Color::hex(0x4651_F6FF);
 /// `selection.handle-fill`.
 pub const HANDLE_FILL: Color = Color::hex(0xFFFF_FFFF);
 
 /// The halo on each side of an object, at 100%.
 const HALO: f32 = 1.0;
-/// How far inside the head the arrow's shaft ends.
-const SHAFT_INSIDE_HEAD: f32 = 2.0;
+/// Where the arrow's shaft meets its head, from the tip, as a part of the head's length: the
+/// head's back edges sweep from there to the barbs.
+const ARROW_NECK: f32 = 0.68;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Width {
@@ -317,8 +318,7 @@ impl Object {
         match self.shape {
             Shape::Line { a, b } => Bounds::of(a, b).inflate(s.stroke / 2.0 + s.halo),
             Shape::Arrow { a, b } => {
-                let reach = (s.head / 2.0 + s.stroke / 4.0).max(s.stroke / 2.0);
-                Bounds::of(a, b).inflate(reach + s.halo)
+                Bounds::of(a, b).inflate(s.head / 2.0 + s.stroke / 4.0 + s.halo)
             }
             Shape::Rect { a, b } | Shape::Ellipse { a, b } => {
                 Bounds::of(a, b).inflate(s.stroke / 2.0 + s.halo)
@@ -332,19 +332,20 @@ impl Object {
     }
 
     /// The point lies on what the object paints, or within `slack` of it. A rectangle or an
-    /// ellipse is hit on its outline only: what is inside stays reachable.
+    /// ellipse is hit on its outline here; inside it, see [`Object::encloses`].
     pub fn hit(&self, p: Pt, k: f32, slack: f32) -> bool {
         let s = self.sizes(k);
         let reach = s.stroke / 2.0 + s.halo + slack;
         match self.shape {
             Shape::Line { a, b } => segment_distance(p, a, b) <= reach,
             Shape::Arrow { a, b } => {
-                if segment_distance(p, a, b) <= reach {
-                    return true;
-                }
-                let (_, tri) = arrow_parts(a, b, s.head);
-                inside_triangle(p, tri) || {
-                    let edge = (0..3).map(|i| segment_distance(p, tri[i], tri[(i + 1) % 3]));
+                let Some(outline) = arrow_outline(a, b, s.stroke, s.head) else {
+                    return false;
+                };
+                let n = outline.len();
+                inside_polygon(p, &outline) || {
+                    let edge =
+                        (0..n).map(|i| segment_distance(p, outline[i], outline[(i + 1) % n]));
                     edge.fold(f32::MAX, f32::min) <= s.stroke / 4.0 + s.halo + slack
                 }
             }
@@ -388,6 +389,30 @@ impl Object {
                 let b = at + Pt::new(half, 0.0);
                 segment_distance(p, a, b) <= r + s.halo + slack
             }
+        }
+    }
+
+    /// The area of the rectangle or the ellipse when the point lies inside it, so that the
+    /// smallest of nested shapes can be picked.
+    pub fn encloses(&self, p: Pt) -> Option<f32> {
+        match self.shape {
+            Shape::Rect { a, b } => {
+                let r = Bounds::of(a, b);
+                let inside =
+                    (r.min.x..=r.max.x).contains(&p.x) && (r.min.y..=r.max.y).contains(&p.y);
+                inside.then(|| r.width() * r.height())
+            }
+            Shape::Ellipse { a, b } => {
+                let r = Bounds::of(a, b);
+                let (rx, ry) = (r.width() / 2.0, r.height() / 2.0);
+                if rx < 0.5 || ry < 0.5 {
+                    return None;
+                }
+                let d = p - r.center();
+                let inside = (d.x / rx).powi(2) + (d.y / ry).powi(2) <= 1.0;
+                inside.then_some(std::f32::consts::PI * rx * ry)
+            }
+            _ => None,
         }
     }
 
@@ -520,21 +545,30 @@ pub fn constrain(shape_is_line: bool, a: Pt, b: Pt) -> Pt {
     }
 }
 
-/// The arrow's shaft (from the tail to 2 px inside the head), if any shows outside the head, and
-/// its head: tip, then the two base corners. A head longer than the arrow shrinks to it.
-pub fn arrow_parts(a: Pt, b: Pt, head: f32) -> (Option<(Pt, Pt)>, [Pt; 3]) {
+/// The arrow as one polygon, before its corners are rounded by `stroke / 4`: the tail, the neck's
+/// side, a barb, the tip, the other barb, the neck's other side. The shaft widens from a point at
+/// the tail to `stroke` at the neck; a head longer than the arrow shrinks to it.
+pub fn arrow_outline(a: Pt, b: Pt, stroke: f32, head: f32) -> Option<[Pt; 6]> {
     let d = b - a;
     let len = d.len();
     if len < 1e-3 {
-        return (None, [b, b, b]);
+        return None;
     }
     let u = d * (1.0 / len);
     let n = Pt::new(-u.y, u.x);
     let l = head.min(len);
+    let neck = b - u * (ARROW_NECK * l);
+    // On a short arrow the shrunk head stays wider than the shaft where they meet.
+    let half = (stroke / 2.0).min(l / 4.0);
     let base = b - u * l;
-    let tri = [b, base + n * (l / 2.0), base - n * (l / 2.0)];
-    let shaft = (len > l).then(|| (a, b - u * (l - SHAFT_INSIDE_HEAD).max(0.0)));
-    (shaft, tri)
+    Some([
+        a,
+        neck + n * half,
+        base + n * (l / 2.0),
+        b,
+        base - n * (l / 2.0),
+        neck - n * half,
+    ])
 }
 
 fn segment_distance(p: Pt, a: Pt, b: Pt) -> f32 {
@@ -548,14 +582,17 @@ fn segment_distance(p: Pt, a: Pt, b: Pt) -> f32 {
     p.dist(a + ab * t)
 }
 
-fn inside_triangle(p: Pt, t: [Pt; 3]) -> bool {
-    let cross = |a: Pt, b: Pt, c: Pt| (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
-    let d = [
-        cross(t[0], t[1], p),
-        cross(t[1], t[2], p),
-        cross(t[2], t[0], p),
-    ];
-    d.iter().all(|&v| v >= 0.0) || d.iter().all(|&v| v <= 0.0)
+/// Even-odd: a ray from `p` crosses the polygon's edges an odd number of times.
+fn inside_polygon(p: Pt, poly: &[Pt]) -> bool {
+    let n = poly.len();
+    let mut inside = false;
+    for i in 0..n {
+        let (a, b) = (poly[i], poly[(i + 1) % n]);
+        if (a.y > p.y) != (b.y > p.y) && p.x < a.x + (p.y - a.y) / (b.y - a.y) * (b.x - a.x) {
+            inside = !inside;
+        }
+    }
+    inside
 }
 
 #[cfg(test)]
@@ -640,21 +677,26 @@ mod tests {
     }
 
     #[test]
-    fn the_arrow_shaft_ends_inside_the_head() {
-        let (shaft, tri) = arrow_parts(Pt::new(0.0, 0.0), Pt::new(100.0, 0.0), 22.0);
-        assert_eq!(shaft, Some((Pt::new(0.0, 0.0), Pt::new(80.0, 0.0))));
+    fn the_arrow_widens_to_its_neck() {
+        let o = arrow_outline(Pt::new(0.0, 0.0), Pt::new(100.0, 0.0), 4.0, 22.0).unwrap();
+        let want = [
+            (0.0, 0.0),
+            (85.04, 2.0),
+            (78.0, 11.0),
+            (100.0, 0.0),
+            (78.0, -11.0),
+            (85.04, -2.0),
+        ];
+        for (p, (x, y)) in o.iter().zip(want) {
+            assert!((p.x - x).abs() < 1e-3 && (p.y - y).abs() < 1e-3, "{o:?}");
+        }
+        // Shorter than its head: the head shrinks to the arrow, the shaft stays narrower.
+        let o = arrow_outline(Pt::new(0.0, 0.0), Pt::new(10.0, 0.0), 8.0, 34.0).unwrap();
+        assert_eq!((o[1].y, o[2]), (2.5, Pt::new(0.0, 5.0)));
         assert_eq!(
-            tri,
-            [
-                Pt::new(100.0, 0.0),
-                Pt::new(78.0, 11.0),
-                Pt::new(78.0, -11.0)
-            ]
+            arrow_outline(Pt::new(1.0, 1.0), Pt::new(1.0, 1.0), 4.0, 22.0),
+            None
         );
-        // Shorter than its head: the head shrinks to the arrow and there is no shaft.
-        let (shaft, tri) = arrow_parts(Pt::new(0.0, 0.0), Pt::new(10.0, 0.0), 22.0);
-        assert_eq!(shaft, None);
-        assert_eq!(tri[1], Pt::new(0.0, 5.0));
     }
 
     #[test]
@@ -675,6 +717,8 @@ mod tests {
         assert!(rect.hit(Pt::new(97.0, 50.0), 1.0, 0.0));
         assert!(!rect.hit(Pt::new(50.0, 50.0), 1.0, 4.0));
         assert!(!rect.hit(Pt::new(104.0, 50.0), 1.0, 0.0));
+        assert_eq!(rect.encloses(Pt::new(50.0, 50.0)), Some(10_000.0));
+        assert_eq!(rect.encloses(Pt::new(101.0, 50.0)), None);
 
         let ellipse = object(Shape::Ellipse {
             a: Pt::new(0.0, 0.0),
@@ -684,14 +728,22 @@ mod tests {
         assert!(ellipse.hit(Pt::new(199.0, 50.0), 1.0, 0.0));
         assert!(!ellipse.hit(Pt::new(100.0, 50.0), 1.0, 4.0));
         assert!(!ellipse.hit(Pt::new(5.0, 5.0), 1.0, 2.0));
+        assert!(ellipse.encloses(Pt::new(100.0, 50.0)).is_some());
+        assert_eq!(ellipse.encloses(Pt::new(5.0, 5.0)), None);
+        assert_eq!(line.encloses(Pt::new(50.0, 0.0)), None);
 
         let arrow = object(Shape::Arrow {
             a: Pt::new(0.0, 0.0),
             b: Pt::new(100.0, 0.0),
         });
-        // The head is wider than the shaft.
+        // The head is wider than the shaft; the notch behind its barbs is not hit.
         assert!(arrow.hit(Pt::new(85.0, 7.0), 1.0, 0.0));
         assert!(!arrow.hit(Pt::new(40.0, 7.0), 1.0, 0.0));
+        assert!(!arrow.hit(Pt::new(79.0, 5.0), 1.0, 0.0));
+        // The shaft is thinner than a line of its width at the tail, and wider at the neck.
+        assert!(line.hit(Pt::new(5.0, 3.0), 1.0, 0.0));
+        assert!(!arrow.hit(Pt::new(5.0, 3.0), 1.0, 0.0));
+        assert!(arrow.hit(Pt::new(80.0, 3.0), 1.0, 0.0));
 
         let counter = object(Shape::Counter {
             at: Pt::new(50.0, 50.0),

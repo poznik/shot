@@ -1,8 +1,10 @@
 #!/bin/sh
 # Builds Shot.app: tools/bundle-mac.sh [--universal] [--sign IDENTITY [--keychain FILE]]
 #
-# Shot.app and Shot-<version>-macos.zip land in target/bundle/. --universal builds for Apple
-# silicon and Intel and joins the two with lipo; without it the build is for this Mac only.
+# Shot.app, Shot-<version>-macos.dmg and Shot-<version>-macos.zip land in target/bundle/. The
+# disk image is what a release offers; the zip of the same app lets tools/publish.py check its
+# signature on Windows. --universal builds for Apple silicon and Intel and joins the two with
+# lipo; without it the build is for this Mac only.
 #
 # Signing is ad-hoc unless --sign names an identity. Shot has no Developer ID, so macOS ties the
 # Screen Recording permission to the designated requirement of the signature. An ad-hoc one is the
@@ -98,4 +100,19 @@ codesign --verify --strict "$app"
 zip="$out/Shot-$version-macos.zip"
 rm -f "$zip"
 ditto -c -k --keepParent "$app" "$zip"
-echo "$app ($(lipo -archs "$app/Contents/MacOS/shot"), signed by $identity), $zip"
+
+# Shot.app next to a link to /Applications, to drag it onto.
+dmg="$out/Shot-$version-macos.dmg"
+stage="$out/dmg"
+rm -rf "$stage" "$dmg"
+mkdir -p "$stage"
+ditto "$app" "$stage/Shot.app"
+ln -s /Applications "$stage/Applications"
+# hdiutil now and then fails with "Resource busy" on CI runners; another try passes.
+for try in 1 2 3; do
+  hdiutil create -quiet -volname Shot -srcfolder "$stage" -format UDZO -ov "$dmg" && break
+  [ "$try" = 3 ] && exit 1
+  sleep 3
+done
+rm -rf "$stage"
+echo "$app ($(lipo -archs "$app/Contents/MacOS/shot"), signed by $identity), $dmg, $zip"

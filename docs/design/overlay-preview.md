@@ -126,12 +126,15 @@ Examples of the thumbnail rule:
 
 No mockup shows the stack; this section is its only description.
 
-- The card appears on the monitor where the cursor was at the hotkey, in the bottom-right corner
-  of its work area: 16 px from the right edge and 16 px above the bottom edge (above the taskbar
-  or Dock).
+- The card appears on the monitor where the cursor was at the hotkey, in a bottom corner of its
+  work area: the left one, or the right one when `preview_side = "right"` (settings, `Угол
+  превью`). 16 px from that side edge and 16 px above the bottom edge (above the taskbar or
+  Dock).
 - Several cards stack upward with an 8 px gap. The newest takes the bottom slot; older cards move
   up one slot.
 - When the next card would cross 16 px below the work-area top, the oldest card is removed.
+- A card keeps the corner it appeared in. When the corner changes while cards are shown, the
+  new cards start a stack of their own in the other corner.
 - A full-screen capture of several monitors adds one card per file.
 
 ### Timing
